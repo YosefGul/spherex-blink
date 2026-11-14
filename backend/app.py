@@ -135,15 +135,16 @@ def get_stack(ra: float, dec: float, fov: float, det: int, save_to: Path | None 
         return _save_stack(save_to or CACHE, key, total, eps, det, n)
 
 
-def spectrum_key(ra: float, dec: float, fov: float, pra: float, pdec: float) -> str:
-    return f"v{SPECTRUM_VERSION}_{ra:.4f}_{dec:+.4f}_{fov:g}_{pra:.5f}_{pdec:+.5f}.json"
+def spectrum_key(ra: float, dec: float, fov: float, pra: float, pdec: float, aper: float = 2.0) -> str:
+    size = "" if aper == 2.0 else f"_a{aper:g}"      # the default aperture keeps the original file names
+    return f"v{SPECTRUM_VERSION}_{ra:.4f}_{dec:+.4f}_{fov:g}_{pra:.5f}_{pdec:+.5f}{size}.json"
 
 
 def get_spectrum(ra: float, dec: float, fov: float, pra: float, pdec: float,
-                 cached_only: bool = False, save_to: Path | None = None) -> dict | None:
+                 cached_only: bool = False, save_to: Path | None = None, aper: float = 2.0) -> dict | None:
     """Spectrum at (pra, pdec) inside the view centred on (ra, dec): cached, shipped, or measured."""
     total = len(query_frames(ra, dec, CACHE))
-    key = spectrum_key(ra, dec, fov, pra, pdec)
+    key = spectrum_key(ra, dec, fov, pra, pdec, aper)
     if save_to is None:
         for base in (CACHE, SEED):
             path = base / "spectra" / key
@@ -158,7 +159,7 @@ def get_spectrum(ra: float, dec: float, fov: float, pra: float, pdec: float,
         return None
     with _BUILD_SLOTS:
         stats: dict = {}
-        out = measure_spectrum(ra, dec, fov, pra, pdec, CACHE, workers=WORKERS, stats=stats)
+        out = measure_spectrum(ra, dec, fov, pra, pdec, CACHE, workers=WORKERS, stats=stats, aperture_pix=aper)
     if stats["failed"]:
         if save_to is not None:
             raise RuntimeError(f"{stats['failed']} exposures could not be read")
@@ -240,14 +241,16 @@ def stack(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
 def spectrum(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
              fov: float = Query(240, ge=30, le=600),
              pra: float = Query(ge=0, lt=360), pdec: float = Query(ge=-90, le=90),
-             cached_only: bool = False):
+             cached_only: bool = False, aper: float = Query(2.0, ge=1.0, le=3.0)):
     """One spectrum point per exposure at (pra, pdec), a spot inside the view (ra, dec, fov).
-    Aperture photometry in mJy. With cached_only, answers {"points": null} instead of measuring."""
+    Aperture photometry in mJy; aper is the aperture radius in native pixels of 6.15 arcsec.
+    With cached_only, answers {"points": null} instead of measuring."""
+    aper = round(aper * 2) / 2                      # steps of half a pixel
     sep = np.hypot((pra - ra + 180) % 360 - 180, pdec - dec) * 3600   # generous box test, arcsec
     if sep > fov and abs(dec) < 89:
         raise HTTPException(422, "the spot is outside the view")
     try:
-        out = get_spectrum(ra, dec, fov, pra, pdec, cached_only)
+        out = get_spectrum(ra, dec, fov, pra, pdec, cached_only, aper=aper)
     except Exception as exc:
         raise HTTPException(502, f"could not measure the spectrum: {exc}") from exc
     return out or {"ra": pra, "dec": pdec, "points": None}

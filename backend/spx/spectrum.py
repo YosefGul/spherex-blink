@@ -19,7 +19,7 @@ from .stack import NATIVE_PIX, split_epochs
 from .tanwcs import clipped_median, mad_std
 from .wave import wavelength
 
-APERTURE_PIX = 2.0            # aperture radius, native pixels (12.3 arcsec)
+APERTURE_PIX = 2.0            # default aperture radius, native pixels (12.3 arcsec)
 ANNULUS_PIX = (4.0, 7.0)      # background annulus, native pixels
 SUB = 5                       # sub-pixel sampling used for the aperture edge
 
@@ -29,12 +29,13 @@ def cutout_half(fov_arcsec: float) -> int:
     return int(np.ceil(fov_arcsec / NATIVE_PIX / 2 * 1.45)) + 3
 
 
-def aperture_flux(data: np.ndarray, px: float, py: float) -> tuple[float, float] | None:
+def aperture_flux(data: np.ndarray, px: float, py: float,
+                  radius: float = APERTURE_PIX) -> tuple[float, float] | None:
     """Background-subtracted aperture sum and its 1-sigma noise, in image units x pixels.
     None if the aperture is cut by the edge, contains bad pixels, or there is no usable sky."""
     ny, nx = data.shape
     r_out = ANNULUS_PIX[1]
-    if not (APERTURE_PIX + 1 <= px < nx - APERTURE_PIX - 1 and APERTURE_PIX + 1 <= py < ny - APERTURE_PIX - 1):
+    if not (radius + 1 <= px < nx - radius - 1 and radius + 1 <= py < ny - radius - 1):
         return None
     x0, x1 = max(0, int(px - r_out)), min(nx, int(px + r_out) + 2)
     y0, y1 = max(0, int(py - r_out)), min(ny, int(py + r_out) + 2)
@@ -52,7 +53,7 @@ def aperture_flux(data: np.ndarray, px: float, py: float) -> tuple[float, float]
     weight = np.zeros(box.shape)
     for dy in offs:
         for dx in offs:
-            weight += np.hypot(xx + dx - px, yy + dy - py) <= APERTURE_PIX
+            weight += np.hypot(xx + dx - px, yy + dy - py) <= radius
     weight /= SUB * SUB
     inside = weight > 0
     if not np.all(np.isfinite(box[inside])):
@@ -63,9 +64,11 @@ def aperture_flux(data: np.ndarray, px: float, py: float) -> tuple[float, float]
 
 
 def spectrum(view_ra: float, view_dec: float, fov_arcsec: float, ra: float, dec: float,
-             cache_dir: Path, workers: int = 16, stats: dict | None = None) -> dict:
+             cache_dir: Path, workers: int = 16, stats: dict | None = None,
+             aperture_pix: float = APERTURE_PIX) -> dict:
     """One point per exposure at (ra, dec), using the cutouts of the view centred on
-    (view_ra, view_dec). Fluxes in mJy; no aperture correction is applied."""
+    (view_ra, view_dec). Fluxes in mJy; no aperture correction is applied, so a smaller
+    aperture keeps neighbours out but loses more of the target's own light."""
     groups = split_epochs(query_frames(view_ra, view_dec, cache_dir))
     epoch_of = {f: i for i, g in enumerate(groups) for f in g}
     half = cutout_half(fov_arcsec)
@@ -82,7 +85,7 @@ def spectrum(view_ra: float, view_dec: float, fov_arcsec: float, ra: float, dec:
             return None
         wcs = cut.wcs
         fx, fy = (float(v) for v in wcs.world2pix(ra, dec))          # full-detector pixel
-        res = aperture_flux(cut.data, fx - cut.x0, fy - cut.y0)
+        res = aperture_flux(cut.data, fx - cut.x0, fy - cut.y0, aperture_pix)
         if res is None or not (0 <= fx <= 2039 and 0 <= fy <= 2039):
             return None
         lam, width = wavelength(f.detector, fx, fy)
@@ -100,6 +103,6 @@ def spectrum(view_ra: float, view_dec: float, fov_arcsec: float, ra: float, dec:
         stats["failed"] = len(failed)
     return {
         "ra": ra, "dec": dec, "exposures": len(frames), "points": points,
-        "aperture_arcsec": APERTURE_PIX * NATIVE_PIX,
+        "aperture_arcsec": aperture_pix * NATIVE_PIX,
         "annulus_arcsec": [ANNULUS_PIX[0] * NATIVE_PIX, ANNULUS_PIX[1] * NATIVE_PIX],
     }

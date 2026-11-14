@@ -80,7 +80,9 @@ python backend/make_seed.py --refresh
 - `GET /api/spectrum?ra=&dec=&fov=&pra=&pdec=` returns one point per exposure at the spot
   (`pra`, `pdec`) inside that view: wavelength and bandwidth in micrometres, flux and noise
   in mJy, date, detector and epoch. The flux is an aperture sum (radius 12.3 arcseconds)
-  minus the median of a surrounding ring; no aperture correction is applied.
+  minus the median of a surrounding ring; no aperture correction is applied. `aper` sets the
+  aperture radius in native pixels (1 to 3, default 2): a smaller aperture keeps neighbours
+  out but loses more of the target's own light.
 - `GET /api/catalog?name=gaia|catwise&ra=&dec=&fov=` returns the catalogue sources in the
   view: position at the catalogue's reference epoch, proper motion in mas/yr and its
   significance, and a magnitude (G for Gaia, W2 for CatWISE).
