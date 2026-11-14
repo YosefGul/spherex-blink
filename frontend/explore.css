@@ -238,3 +238,10 @@ body.embed .body { padding: 8px; justify-content: center; }
   .strip { overflow-x: auto; scrollbar-width: none; }
   #timeStrip .tile { flex: 1 0 70px; overflow: hidden; white-space: nowrap; }
 }
+@media (max-width: 820px) {
+  #timeStrip .tile { gap: 3px; padding: 3px 2px 3px 3px; }
+  #timeStrip .tile .th { width: 28px; height: 28px; }
+  .sheet:not(.open) #flow, .sheet:not(.open) #secMotion > h2 { display: none; }
+  .state { padding: 16px; gap: 12px; }
+  .state .loader { padding: 16px; }
+}

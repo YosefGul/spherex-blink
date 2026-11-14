@@ -499,8 +499,8 @@ function buildMatrix() {
     html += "</div>";
   }
   m.innerHTML = n ? html : `<p class="t-caption c-3" style="margin:0">The table fills in once the exposures of this position are known.</p>`;
-  $("timeStrip").innerHTML = `<span class="t-micro c-3">Visit</span>` + eps.map((e, i) => (e.frames[S.det]
-    ? `<button type="button" class="tile" data-ep="${i}" style="--c:${epochVar(i, n)}"><span class="th">${thumb("cur", i)}</span><i></i>${esc(shortLabel(e))}</button>`
+  $("timeStrip").innerHTML = `<span class="t-micro c-3">Time</span>` + eps.map((e, i) => (e.frames[S.det]
+    ? `<button type="button" class="tile" data-ep="${i}" style="--c:${epochVar(i, n)}"><span class="th">${thumb("cur", i)}</span><i></i>${esc(head(e, i))}</button>`
     : `<span class="tile none">–</span>`)).join("");
   $("bandStrip").innerHTML = `<span class="t-micro c-3">Band</span>` + DETS.map(d => `<button type="button" class="tile" data-det="${d}"><span class="th">${thumb(d, "cur")}</span>D${d}</button>`).join("");
 }
@@ -659,7 +659,8 @@ function syncControls() {
     mx.scrollLeft = Math.max(0, head.offsetLeft - mx.clientWidth + head.offsetWidth + 8);
   }
   document.querySelectorAll("#timeStrip .tile[data-ep]").forEach(c => c.classList.toggle("on", Number(c.dataset.ep) === S.ep && S.mode !== "stack"));
-  document.querySelectorAll("#bandStrip .tile").forEach(c => c.classList.toggle("on", Number(c.dataset.det) === S.det));
+  const fr = S.meta?.epochs[S.ep]?.frames;
+  document.querySelectorAll("#bandStrip .tile").forEach(c => { c.classList.toggle("on", Number(c.dataset.det) === S.det); c.classList.toggle("none", !!fr && !fr[c.dataset.det]); });
 }
 function layout() {           // the image is a square that fills the height left by the bars
   const b = $("body"), embed = document.body.classList.contains("embed");

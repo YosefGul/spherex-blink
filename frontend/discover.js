@@ -320,7 +320,9 @@ function findChanges() {
       return;
     }
     const fa = sum(A, bgA, c), fb = sum(B, bgB, c), base = up ? fa : fb;
-    const amount = base > apSig ? `${up ? "+" : "−"}${Math.min(999, Math.abs((fb - fa) / fa * 100)).toFixed(0)}%` : "";
+    const pct = base > apSig ? Math.abs((fb - fa) / fa * 100) : null;
+    if (pct !== null && pct < 10) return;      // a few per cent on a bright star is how the pixels fell, not a change
+    const amount = pct !== null ? `${up ? "+" : "−"}${Math.min(999, pct).toFixed(0)}%` : "";
     rows.push({ kind: up ? (amount ? "Brightened" : "Appeared") : (amount ? "Faded" : "Gone"), amount, c, rank: Math.abs(c.v) });
   });
   rows.sort((x, y) => y.rank - x.rank);
@@ -421,7 +423,7 @@ function startItems() {
   const n = candidates().length;
   return mi("refresh", "Pick a patch for me", "A random field near an ecliptic pole, where SPHEREx returns most often", 'data-act="pick"')
     + `<span class="t-micro c-3 lbl">Test targets</span>`
-    + TARGETS.map((t, i) => `<button type="button" class="mi between${Math.abs(t.ra - S.ra) < 1e-4 && Math.abs(t.dec - S.dec) < 1e-4 ? " hl" : ""}" role="menuitem" data-target="${i}"><span class="t-label">${esc(t.name)}</span><span class="t-caption c-3">${t.kind}</span></button>`).join("")
+    + TARGETS.map((t, i) => `<button type="button" class="mi between${Math.abs(t.ra - S.ra) < 1e-4 && Math.abs(t.dec - S.dec) < 1e-4 ? " hl" : ""}" role="menuitem" data-target="${i}"><span class="t-label">${esc(t.long || t.short)}</span><span class="t-caption c-3">${t.kind}</span></button>`).join("")
     + `<hr class="div"><button type="button" class="mi between" role="menuitem" data-act="cands"><span class="row" style="gap:12px">${ico("star", 16)}<span class="t-label">My candidates</span></span><span class="count c-2">${n}</span></button>`;
 }
 function shareItems() {
@@ -463,18 +465,22 @@ function openHelp() {
 // ---------- phone: the panels move into a sheet with three heights ----------
 const SHEET_TABS = { find: ["secMotion", "secChanges"], spec: ["secSpectrum"], layers: ["layers", "cut"], matrix: ["navigator"] };
 const homes = new Map();
-let sheetTab = "find", sheetOn = false;
-function detents() { return [92, 230, Math.max(260, window.innerHeight - 110)]; }
-function setSheet(h, drag = false) {
-  $("sheet").classList.toggle("dragging", drag);
-  $("sheet").style.setProperty("--sheet-h", `${Math.round(h)}px`);
-  $("sheet").dataset.h = Math.round(h);
+let sheetTab = "find", sheetOn = false, sheetLevel = 1, sheetDragging = false;
+function detents() {        // peek, up to the controls, nearly full
+  const mid = Math.max(170, Math.round(window.innerHeight - $("timeline").getBoundingClientRect().bottom));
+  return [92, mid, Math.max(mid + 120, window.innerHeight - 110)];
+}
+function setSheet(level) {
+  sheetLevel = level;
+  $("sheet").classList.remove("dragging");
+  $("sheet").classList.toggle("open", level === 2);
+  $("sheet").style.setProperty("--sheet-h", `${detents()[level]}px`);
 }
 function showTab(tab) {
   sheetTab = tab;
   for (const [k, ids] of Object.entries(SHEET_TABS)) for (const id of ids) $(id).hidden = k !== tab;
   document.querySelectorAll("#sheetTabs button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tab === tab)));
-  if (Number($("sheet").dataset.h) < 200) setSheet(detents()[1]);
+  if (sheetLevel === 0) setSheet(1);
   App.render();
 }
 function syncSheet() {
@@ -484,28 +490,34 @@ function syncSheet() {
   const ids = Object.values(SHEET_TABS).flat();
   if (on) {
     for (const id of ids) { const el = $(id); homes.set(id, [el.parentNode, el.nextSibling]); $("sheetBody").append(el); }
-    setSheet(detents()[1]); showTab(sheetTab);
+    setSheet(1); showTab(sheetTab);
   } else {
     for (const id of ids) { const [parent, next] = homes.get(id); parent.insertBefore($(id), next); $(id).hidden = false; }
     App.layout(); App.render();
   }
 }
-function sheetDrag() {
+App.on("render", () => { if (sheetOn && !sheetDragging) $("sheet").style.setProperty("--sheet-h", `${detents()[sheetLevel]}px`); });
+function sheetDrag() {      // the sheet follows the finger; on release it settles at the height the flick was heading for
   const g = $("grab");
   let y0 = 0, h0 = 0, hist = [];
-  g.addEventListener("pointerdown", ev => { g.setPointerCapture(ev.pointerId); y0 = ev.clientY; h0 = $("sheet").getBoundingClientRect().height; hist = [[ev.timeStamp, ev.clientY]]; });
+  g.addEventListener("pointerdown", ev => {
+    try { g.setPointerCapture(ev.pointerId); } catch { /* not a live pointer */ }
+    sheetDragging = true; y0 = ev.clientY; h0 = $("sheet").getBoundingClientRect().height; hist = [[ev.timeStamp, ev.clientY]];
+  });
   g.addEventListener("pointermove", ev => {
-    if (!g.hasPointerCapture(ev.pointerId)) return;
+    if (!sheetDragging) return;
     const [lo, , hi] = detents(); let h = h0 + (y0 - ev.clientY);
     if (h > hi) h = hi + (h - hi) * 0.25; if (h < lo) h = lo - (lo - h) * 0.25;     // soft edges
-    setSheet(h, true); hist.push([ev.timeStamp, ev.clientY]); if (hist.length > 5) hist.shift();
+    $("sheet").classList.add("dragging"); $("sheet").style.setProperty("--sheet-h", `${Math.round(h)}px`);
+    hist.push([ev.timeStamp, ev.clientY]); if (hist.length > 5) hist.shift();
   });
   const end = ev => {
-    if (!g.hasPointerCapture(ev.pointerId)) return;
-    g.releasePointerCapture(ev.pointerId);
+    if (!sheetDragging) return;
+    sheetDragging = false;
     const [t0, ya] = hist[0], [t1, yb] = hist[hist.length - 1], v = t1 > t0 ? (ya - yb) / (t1 - t0) * 1000 : 0;   // px/s, up is positive
-    const h = $("sheet").getBoundingClientRect().height + v * 0.18, d = detents();
-    setSheet(Math.abs(yb - y0) < 4 && hist.length < 3 ? d[(d.indexOf(Number($("sheet").dataset.h)) + 1) % 3] || d[1] : d.reduce((a, b) => (Math.abs(b - h) < Math.abs(a - h) ? b : a)));
+    const d = detents(), h = $("sheet").getBoundingClientRect().height + v * 0.18;
+    const tap = Math.abs(ev.clientY - y0) < 4;
+    setSheet(tap ? (sheetLevel + 1) % 3 : d.indexOf(d.reduce((a, b) => (Math.abs(b - h) < Math.abs(a - h) ? b : a))));
   };
   g.addEventListener("pointerup", end); g.addEventListener("pointercancel", end);
 }

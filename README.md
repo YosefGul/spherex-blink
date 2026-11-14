@@ -26,8 +26,20 @@ Built for the NASA Space Apps Challenge 2026, challenge "Planet X and SPHEREx".
   catalogue's proper motion puts the source on the date of the epoch shown, so a mark that
   follows a star from epoch to epoch confirms the motion independently. Sources with a
   well-measured motion above 0.15 arcseconds per year get a trail and a label.
-- Keeps the position, field of view, band, mode and overlays in the page address, so a view can be
-  shared as a link. `&embed=1` hides the side panels.
+- Shows every band and visit in one table (**bands × visits**), with the number of exposures
+  behind each image, and steps through visits or through bands.
+- Measures the **marked source**: click a source and the tool follows it from visit to
+  visit, gives its shift in arcseconds and arcseconds per year, and checks whether Gaia DR3
+  or CatWISE2020 lists an object there. A source no catalogue knows can be saved as a
+  **candidate** (kept in the browser, exportable as CSV).
+- Lists **changes in the field** between the first and the last visit: sources that moved,
+  brightened or faded.
+- Keeps the position, field of view, band, mode, overlays and marked source in the page
+  address, so a view can be shared as a link. `&embed=1` shows the image and timeline only.
+- Works on a phone, in a light and a dark theme.
+
+The site has six pages: Home (`/`), the tool (`/explore`), Targets, Method, API (`/api-docs`)
+and About. `/explore?pick=1` opens a random field near an ecliptic pole.
 
 The five test targets named in the challenge are one click away: Barnard's Star,
 Epsilon Indi B, WISE 0855-0714, RW Aurigae and R Draconis.
@@ -98,6 +110,15 @@ python backend/make_seed.py --refresh
 - The spectrum aperture is wider than the image resolution, so a neighbour within about
   12 arcseconds is included in the measurement. Exposures with saturated pixels in the
   aperture are skipped, which leaves very bright stars with few or no points.
+- The shift of the marked source and the list of changes are measured in the browser from
+  the stacked images (brightness-weighted centre in each visit). They are a guide for the
+  eye, not calibrated astrometry: faint or blended sources can give a false shift, and a
+  saturated star is located from its wings with an error of a few arcseconds. On the five
+  test targets the measured motions are 9.3 (Barnard's Star, catalogue 10.4), 4.5
+  (Epsilon Indi B, catalogue 4.7) and 7.7 (WISE 0855-0714) arcseconds per year.
+- Wider fields (30 arcminutes, 1 degree), the quality-flag layer, the zodiacal-light
+  layer and GIF export are shown in the interface but switched off: the server does not
+  provide them yet.
 
 ## Code layout
 
@@ -107,7 +128,11 @@ python backend/make_seed.py --refresh
 - `backend/spx/stack.py` groups exposures into epochs and stacks them.
 - `backend/spx/wave.py` gives the wavelength of each detector pixel (from the WCS-WAVE
   extension of the SPHEREx files); `backend/spx/spectrum.py` does the photometry.
-- `backend/app.py` is the HTTP API; `frontend/` is the viewer (plain HTML, CSS and JavaScript).
+- `backend/app.py` is the HTTP API and serves the pages.
+- `frontend/` is plain HTML, CSS and JavaScript, with no build step. `site.css` and `site.js`
+  hold the shared look, theme and top bar; `sky.js` the image helpers; `explore.html`,
+  `explore.css`, `app.js` (data, image, table, timeline, spectrum) and `discover.js`
+  (motion, catalogue check, candidates, change list, menus, phone sheet) are the tool.
 
 ## Data and software credits
 

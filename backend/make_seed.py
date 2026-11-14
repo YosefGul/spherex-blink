@@ -5,7 +5,7 @@ even on a host that starts with an empty disk. Re-run after a new SPHEREx data r
 
     python backend/make_seed.py --refresh
 
-Keep TARGETS in step with TARGETS in frontend/app.js. AI-assisted code (Claude Code).
+Keep TARGETS in step with TARGETS in frontend/site.js. AI-assisted code (Claude Code).
 """
 from __future__ import annotations
 
