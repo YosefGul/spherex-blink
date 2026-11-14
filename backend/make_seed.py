@@ -13,7 +13,7 @@ import argparse
 import shutil
 import time
 
-from app import CACHE, SEED, get_stack
+from app import CACHE, SEED, get_spectrum, get_stack
 from spx.index import _cache_file, query_frames
 
 TARGETS = {
@@ -46,6 +46,11 @@ def main() -> None:
                 print(f"{name:15s} D{det}: {int(sum(s['used'])):4d} frames in {int(sum(s['has']))} epochs")
             except Exception as exc:
                 print(f"{name:15s} D{det}: FAILED, {exc}")
+        try:   # spectrum at the centre of the view, shown as soon as the target opens
+            sp = get_spectrum(ra, dec, FOV, ra, dec, save_to=SEED)
+            print(f"{name:15s} spectrum: {len(sp['points'])} points")
+        except Exception as exc:
+            print(f"{name:15s} spectrum: FAILED, {exc}")
         print(f"{name}: {len(frames)} exposures, {time.time() - t0:.0f} s")
 
 

@@ -21,7 +21,10 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 
+import json
+
 from spx.index import query_frames
+from spx.spectrum import spectrum as measure_spectrum
 from spx.stack import NATIVE_PIX, Epoch, build, split_epochs
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -29,6 +32,7 @@ CACHE = Path(os.environ.get("SPX_CACHE_DIR") or ROOT / "data" / "cache")
 SEED = ROOT / "data" / "seed"      # shipped with the code: results for the challenge's test targets
 WORKERS = int(os.environ.get("SPX_WORKERS", "16"))
 STACK_VERSION = 1                  # bump when stacking changes, so old cached results are ignored
+SPECTRUM_VERSION = 1               # same, for the photometry
 
 BANDS = {1: (0.75, 1.09), 2: (1.10, 1.62), 3: (1.63, 2.41), 4: (2.42, 3.82), 5: (3.83, 4.41), 6: (4.42, 5.00)}
 
@@ -130,6 +134,43 @@ def get_stack(ra: float, dec: float, fov: float, det: int, save_to: Path | None 
         return _save_stack(save_to or CACHE, key, total, eps, det, n)
 
 
+def spectrum_key(ra: float, dec: float, fov: float, pra: float, pdec: float) -> str:
+    return f"v{SPECTRUM_VERSION}_{ra:.4f}_{dec:+.4f}_{fov:g}_{pra:.5f}_{pdec:+.5f}.json"
+
+
+def get_spectrum(ra: float, dec: float, fov: float, pra: float, pdec: float,
+                 cached_only: bool = False, save_to: Path | None = None) -> dict | None:
+    """Spectrum at (pra, pdec) inside the view centred on (ra, dec): cached, shipped, or measured."""
+    total = len(query_frames(ra, dec, CACHE))
+    key = spectrum_key(ra, dec, fov, pra, pdec)
+    if save_to is None:
+        for base in (CACHE, SEED):
+            path = base / "spectra" / key
+            if path.exists():
+                try:
+                    hit = json.loads(path.read_text())
+                    if hit["exposures"] == total:
+                        return hit
+                except Exception as exc:
+                    print(f"ignoring {path}: {exc}")
+    if cached_only:
+        return None
+    with _BUILD_SLOTS:
+        stats: dict = {}
+        out = measure_spectrum(ra, dec, fov, pra, pdec, CACHE, workers=WORKERS, stats=stats)
+    if stats["failed"]:
+        if save_to is not None:
+            raise RuntimeError(f"{stats['failed']} exposures could not be read")
+        print(f"{key}: {stats['failed']} exposures could not be read; spectrum not cached")
+        return out
+    path = (save_to or CACHE) / "spectra" / key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.stem}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(out, separators=(",", ":")))
+    os.replace(tmp, path)
+    return out
+
+
 def _epoch_meta(ep: Epoch) -> dict:
     mjds = [f.mjd for f in ep.frames]
     counts = {d: sum(f.detector == d for f in ep.frames) for d in BANDS}
@@ -172,6 +213,23 @@ def stack(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
             k += 1
         out.append({"label": str(label), "mjd": float(mjd), "used": int(used), "data": data})
     return {"ra": ra, "dec": dec, "fov": fov, "det": det, "n": int(s["n"]), "pixscale": NATIVE_PIX / 2, "epochs": out}
+
+
+@app.get("/api/spectrum")
+def spectrum(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
+             fov: float = Query(240, ge=30, le=600),
+             pra: float = Query(ge=0, lt=360), pdec: float = Query(ge=-90, le=90),
+             cached_only: bool = False):
+    """One spectrum point per exposure at (pra, pdec), a spot inside the view (ra, dec, fov).
+    Aperture photometry in mJy. With cached_only, answers {"points": null} instead of measuring."""
+    sep = np.hypot((pra - ra + 180) % 360 - 180, pdec - dec) * 3600   # generous box test, arcsec
+    if sep > fov and abs(dec) < 89:
+        raise HTTPException(422, "the spot is outside the view")
+    try:
+        out = get_spectrum(ra, dec, fov, pra, pdec, cached_only)
+    except Exception as exc:
+        raise HTTPException(502, f"could not measure the spectrum: {exc}") from exc
+    return out or {"ra": pra, "dec": pdec, "points": None}
 
 
 app.mount("/", StaticFiles(directory=ROOT / "frontend", html=True), name="frontend")

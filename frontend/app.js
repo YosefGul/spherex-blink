@@ -18,7 +18,9 @@ const D2R = Math.PI / 180;
 const $ = id => document.getElementById(id);
 
 const S = { ra: 133.7598, dec: -7.2422, fov: 240, det: 5, mode: "blink", ep: 0, ref: 0, hi: 12,
-  fps: 2, timer: null, meta: null, stacks: {}, pending: {}, token: 0 };
+  fps: 2, timer: null, meta: null, stacks: {}, pending: {}, token: 0,
+  pick: null, spec: null, specState: "", specDrawn: [] };
+const BAND_UM = { 1: [0.75, 1.09], 2: [1.10, 1.62], 3: [1.63, 2.41], 4: [2.42, 3.82], 5: [3.83, 4.41], 6: [4.42, 5.00] };
 const PREFETCH_MAX_FRAMES = 600;
 const SESAME_MIRRORS = ["https://vizier.cfa.harvard.edu/viz-bin/nph-sesame", "https://cds.unistra.fr/cgi-bin/nph-sesame"];
 
@@ -95,6 +97,13 @@ async function resolveName(name) {
   if (!m) throw new Error(`Could not find "${name}". Enter coordinates instead.`);
   return { ra: Number(m[1]), dec: Number(m[2]) };
 }
+function skyToPix(ra, dec, n, ps) {   // inverse of pixToSky
+  const d0 = S.dec * D2R, d = dec * D2R, da = (ra - S.ra) * D2R;
+  const cosc = Math.sin(d0) * Math.sin(d) + Math.cos(d0) * Math.cos(d) * Math.cos(da);
+  const xi = Math.cos(d) * Math.sin(da) / cosc;
+  const eta = (Math.cos(d0) * Math.sin(d) - Math.sin(d0) * Math.cos(d) * Math.cos(da)) / cosc;
+  return { ix: (n - 1) / 2 - xi / D2R * 3600 / ps, iy: (n - 1) / 2 + eta / D2R * 3600 / ps };
+}
 function pixToSky(ix, iy, n, ps) {
   const xi = -(ix - (n - 1) / 2) * ps / 3600 * D2R, eta = (iy - (n - 1) / 2) * ps / 3600 * D2R;
   const d0 = S.dec * D2R, den = Math.cos(d0) - eta * Math.sin(d0);
@@ -108,6 +117,7 @@ async function load() {
   const token = ++S.token;
   stop();
   S.meta = null; S.stacks = {}; S.pending = {};
+  S.pick = { ra: S.ra, dec: S.dec }; S.spec = null; S.specState = "";
   writeUrl(); syncControls(); buildRail(); $("track").innerHTML = ""; render();
   setStatus("Looking up SPHEREx exposures… A new position takes about 30 s the first time.");
   try {
@@ -117,6 +127,7 @@ async function load() {
     if (!meta.epochs.length) { setStatus("SPHEREx has no released exposures of this position yet.", true); return; }
     S.ep = meta.epochs.length - 1; S.ref = 0;
     buildTrack(); buildRef();
+    loadSpectrum(true);
     await ensureDet(S.det, token);
     // Each exposure costs ~0.5 MB of archive reads. Prefetch the other bands for their
     // thumbnails only where that is cheap; elsewhere a band loads when it is selected.
@@ -212,6 +223,7 @@ function render() {
   }
   renderLabels(st, cur);
   renderMeta(st);
+  renderSpectrum();
   for (const d of [1, 2, 3, 4, 5, 6]) drawThumb(d);
   document.querySelectorAll(".ep").forEach((b, i) => b.setAttribute("aria-pressed", String(i === S.ep && S.mode !== "stack")));
   document.querySelectorAll(".band").forEach(b => b.setAttribute("aria-pressed", String(Number(b.dataset.det) === S.det)));
@@ -225,6 +237,14 @@ function drawOverlay(ctx, x0, y0, side, dpr) {
     ctx.moveTo(cx + dx * g, cy + dy * g); ctx.lineTo(cx + dx * (g + l), cy + dy * (g + l));
   }
   ctx.stroke();
+  const st = S.stacks[S.det];
+  if (S.pick && st) {   // spot whose spectrum is shown; the circle is the photometry aperture
+    const p = skyToPix(S.pick.ra, S.pick.dec, st.n, st.pixscale);
+    const mx = x0 + (p.ix + 0.5) / st.n * side, my = y0 + (1 - (p.iy + 0.5) / st.n) * side;
+    const rad = (S.spec?.aperture_arcsec || 12.3) / S.fov * side;
+    ctx.save(); ctx.strokeStyle = "#DDE6FF"; ctx.lineWidth = 1.5 * dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.beginPath(); ctx.arc(mx, my, rad, 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
+  }
   const arc = S.fov <= 150 ? 15 : S.fov <= 400 ? 30 : 60, len = side / S.fov * arc;
   const bx = x0 + side - 84 * dpr, by = y0 + side - 34 * dpr;
   ctx.fillStyle = "#E8ECF2"; ctx.fillRect(bx - len, by, len, 2 * dpr);
@@ -236,6 +256,100 @@ function drawOverlay(ctx, x0, y0, side, dpr) {
   ctx.font = `${10 * dpr}px Inter, system-ui, sans-serif`;
   ctx.fillText("N", ox, oy - a - 4 * dpr); ctx.fillText("E", ox - a - 8 * dpr, oy + 3 * dpr);
 }
+// ---------- spectrum ----------
+async function loadSpectrum(cachedOnly) {
+  const token = S.token, pick = S.pick;
+  S.spec = null; S.specState = cachedOnly ? "" : "loading"; renderSpectrum();
+  try {
+    const r = await api(`/api/spectrum?ra=${S.ra}&dec=${S.dec}&fov=${S.fov}&pra=${pick.ra.toFixed(5)}&pdec=${pick.dec.toFixed(5)}${cachedOnly ? "&cached_only=1" : ""}`);
+    if (token !== S.token || pick !== S.pick) return;
+    S.spec = r.points ? r : null; S.specState = r.points ? "" : "hint";
+  } catch (e) {
+    if (token !== S.token || pick !== S.pick) return;
+    S.specState = "error:" + e.message;
+  }
+  render();
+}
+function niceTicks(lo, hi, count) {
+  const raw = (hi - lo) / count, mag = 10 ** Math.floor(Math.log10(raw)), f = raw / mag;
+  const step = (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * mag, out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-6; v += step) out.push(Math.abs(v) < step * 1e-6 ? 0 : v);
+  return out;
+}
+function renderSpectrum() {
+  const cv = $("spec"), info = $("specInfo"), pts = S.spec?.points, box = cv.getBoundingClientRect();
+  $("specCsv").hidden = !pts?.length;
+  S.specDrawn = [];
+  if (!pts?.length) {
+    info.textContent = S.specState === "loading" ? "Measuring every exposure at the marker…"
+      : S.specState.startsWith("error:") ? S.specState.slice(6)
+      : pts ? "No exposure could be measured at this spot (image edge or saturated pixels)."
+      : S.specState === "hint" ? "Click the image to measure the spectrum of that spot. Every exposure there is read, which can take a minute the first time."
+      : "";
+  }
+  if (!box.width) return;                       // side panel hidden on narrow screens
+  const dpr = window.devicePixelRatio || 1, W = Math.round(box.width * dpr), H = Math.round(box.height * dpr);
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d");
+  if (!pts?.length) return;
+
+  const m = { l: 46 * dpr, r: 8 * dpr, t: 16 * dpr, b: 24 * dpr }, X0 = 0.7, X1 = 5.1;
+  const fl = pts.map(p => p.flux).sort((a, b) => a - b), q = f => fl[Math.min(fl.length - 1, Math.floor(f * fl.length))];
+  let lo = Math.min(0, q(0.02)), hi = Math.max(q(0.98), lo + 1e-6);
+  const pad = (hi - lo) * 0.08; hi += pad; if (lo < 0) lo -= pad;
+  const x = lam => m.l + (lam - X0) / (X1 - X0) * (W - m.l - m.r);
+  const y = f => H - m.b - (Math.min(hi, Math.max(lo, f)) - lo) / (hi - lo) * (H - m.t - m.b);
+
+  ctx.font = `${10 * dpr}px ui-monospace, Consolas, monospace`; ctx.textBaseline = "middle";
+  for (const d of [1, 2, 3, 4, 5, 6]) {         // detector bands
+    const [a, b] = BAND_UM[d];
+    if (d % 2) { ctx.fillStyle = "rgba(255,255,255,.035)"; ctx.fillRect(x(a), m.t, x(b) - x(a), H - m.t - m.b); }
+    ctx.fillStyle = BANDS[d][1]; ctx.textAlign = "center"; ctx.fillText(`D${d}`, (x(a) + x(b)) / 2, 8 * dpr);
+  }
+  ctx.strokeStyle = "#262C38"; ctx.fillStyle = "#6B7483"; ctx.lineWidth = dpr;
+  for (const v of niceTicks(lo, hi, 4)) {
+    ctx.beginPath(); ctx.moveTo(m.l, y(v)); ctx.lineTo(W - m.r, y(v)); ctx.stroke();
+    ctx.textAlign = "right"; ctx.fillText(String(Number(v.toPrecision(3))), m.l - 5 * dpr, y(v));
+  }
+  for (const v of [1, 2, 3, 4, 5]) { ctx.textAlign = "center"; ctx.fillText(String(v), x(v), H - m.b + 9 * dpr); }
+  ctx.textAlign = "right"; ctx.fillText("µm", W - m.r, H - 6 * dpr);
+  ctx.textAlign = "left"; ctx.fillText("mJy", 4 * dpr, 8 * dpr);
+
+  const lit = p => S.mode === "stack" || p.epoch === S.ep || (S.mode === "diff" && p.epoch === S.ref);
+  for (const pass of [false, true]) {           // dimmed epochs first, the shown epoch on top
+    for (const p of pts) {
+      if (lit(p) !== pass) continue;
+      const px = x(p.wavelength), py = y(p.flux);
+      ctx.globalAlpha = pass ? 1 : 0.2; ctx.fillStyle = ctx.strokeStyle = epColor(p.epoch);
+      if (pass && p.error > (hi - lo) * 0.03) {
+        ctx.beginPath(); ctx.moveTo(px, y(p.flux - p.error)); ctx.lineTo(px, y(p.flux + p.error)); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.arc(px, py, (pass ? 2.2 : 1.8) * dpr, 0, 2 * Math.PI); ctx.fill();
+      if (pass) S.specDrawn.push({ px: px / dpr, py: py / dpr, p });
+    }
+  }
+  ctx.globalAlpha = 1;
+  const eps = S.meta?.epochs || [], which = S.mode === "stack" ? "all epochs"
+    : S.mode === "diff" ? `${eps[S.ep]?.label} and ${eps[S.ref]?.label}` : eps[S.ep]?.label;
+  const skipped = S.spec.exposures - pts.length;
+  info.textContent = `${pts.length} exposures, one dot each${skipped ? ` (${skipped} more skipped: saturated or off the detector edge)` : ""}; bright dots: ${which}. Aperture radius ${S.spec.aperture_arcsec.toFixed(1)}″ (the dashed circle), sky from a ring around it, no aperture correction. Neighbours inside the circle are included.`;
+}
+function specHover(ev) {
+  const r = $("spec").getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  let best = null, bd = 144;
+  for (const d of S.specDrawn) { const k = (d.px - mx) ** 2 + (d.py - my) ** 2; if (k < bd) { bd = k; best = d.p; } }
+  $("specHover").textContent = best
+    ? `${best.wavelength.toFixed(3)} µm  ${best.flux.toPrecision(3)} ± ${best.error.toPrecision(2)} mJy  ${isoDay(best.mjd)}  D${best.det}` : "\u00a0";
+}
+function specCsv() {
+  const rows = ["wavelength_um,bandwidth_um,flux_mJy,error_mJy,mjd,detector,epoch"];
+  for (const p of S.spec.points) rows.push([p.wavelength, p.bandwidth, p.flux, p.error, p.mjd, p.det, S.meta.epochs[p.epoch].label].join(","));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([rows.join("\n") + "\n"], { type: "text/csv" }));
+  a.download = `spherex_spectrum_${S.spec.ra.toFixed(5)}_${S.spec.dec.toFixed(5)}.csv`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
 function renderLabels(st, cur) {
   const eps = S.meta?.epochs || [], e = eps[S.ep], el = $("epochLabel");
   if (!e) { el.textContent = ""; $("subLabel").textContent = ""; $("legend").textContent = ""; return; }
@@ -443,7 +557,17 @@ function init() {
     dd[0].textContent = p ? `${p.ra.toFixed(5)}  ${p.dec >= 0 ? "+" : "−"}${Math.abs(p.dec).toFixed(5)}` : "–";
     dd[1].textContent = p && Number.isFinite(p.val) ? `${p.val.toExponential(2)} MJy/sr (${(p.val / p.sigma).toFixed(1)}σ)` : "–";
   };
-  view.ondblclick = ev => { const p = pointer(ev); if (p) goTo(p.ra, p.dec); };
+  let clickTimer = null;   // wait briefly so that a double-click does not also measure a spectrum
+  view.onclick = ev => {
+    const p = pointer(ev);
+    if (!p) return;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => { S.pick = { ra: p.ra, dec: p.dec }; render(); loadSpectrum(false); }, 260);
+  };
+  view.ondblclick = ev => { clearTimeout(clickTimer); const p = pointer(ev); if (p) goTo(p.ra, p.dec); };
+  $("spec").onmousemove = specHover;
+  $("spec").onmouseleave = () => ($("specHover").textContent = "\u00a0");
+  $("specCsv").onclick = specCsv;
 
   window.addEventListener("keydown", ev => {
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(ev.target.tagName) || ev.ctrlKey || ev.metaKey || ev.altKey) return;

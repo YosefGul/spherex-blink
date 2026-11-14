@@ -68,7 +68,7 @@ def build(ra: float, dec: float, fov_arcsec: float, cache_dir: Path,
     groups = split_epochs(query_frames(ra, dec, cache_dir), gap_days)
     wanted = [f for g in groups for f in g if f.detector in detectors]
     grid, n = sky_grid(ra, dec, fov_arcsec, NATIVE_PIX / 2)
-    half = int(np.ceil(fov_arcsec / NATIVE_PIX / 2 * 1.45)) + 3   # margin for field rotation
+    half = int(np.ceil(fov_arcsec / NATIVE_PIX / 2 * 1.45)) + 3   # margin for field rotation; keep equal to spectrum.cutout_half
 
     def load(f: Frame):
         try:

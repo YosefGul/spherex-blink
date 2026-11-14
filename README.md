@@ -18,6 +18,10 @@ Built for the NASA Space Apps Challenge 2026, challenge "Planet X and SPHEREx".
   directly, because consecutive exposures of one spot are taken at different wavelengths.
 - Shows the result in three modes: **Blink** (epochs in turn), **Difference** (one epoch
   minus another; a moving source shows as a blue and red pair), and **Stack** (all epochs).
+- Measures a **spectrum** of any spot you click. Each exposure sees the spot through a
+  different part of SPHEREx's linear variable filter, so each exposure gives one point
+  (wavelength, brightness). The points of all six detectors together cover 0.75 to 5
+  micrometres, coloured by epoch, and can be downloaded as CSV.
 - Keeps the position, field of view, band and mode in the page address, so a view can be
   shared as a link. `&embed=1` hides the side panels.
 
@@ -68,6 +72,10 @@ python backend/make_seed.py --refresh
 - `GET /api/stack?ra=&dec=&fov=&det=` returns one stacked image per epoch for one band
   (`fov` in arcseconds, 30 to 600; `det` 1 to 6). Images are base64 little-endian float32
   in MJy/sr on a 3.075 arcsecond grid, row 0 at the south edge.
+- `GET /api/spectrum?ra=&dec=&fov=&pra=&pdec=` returns one point per exposure at the spot
+  (`pra`, `pdec`) inside that view: wavelength and bandwidth in micrometres, flux and noise
+  in mJy, date, detector and epoch. The flux is an aperture sum (radius 12.3 arcseconds)
+  minus the median of a surrounding ring; no aperture correction is applied.
 - `GET /api/health`
 
 ## Known limits
@@ -77,7 +85,9 @@ python backend/make_seed.py --refresh
 - Very bright stars have empty (saturated) cores in some bands.
 - The field of view is at most 10 arcminutes, which is too small to search for a distant
   planet that would move by many arcminutes between visits.
-- Spectra are not shown.
+- The spectrum aperture is wider than the image resolution, so a neighbour within about
+  12 arcseconds is included in the measurement. Exposures with saturated pixels in the
+  aperture are skipped, which leaves very bright stars with few or no points.
 
 ## Code layout
 
@@ -85,6 +95,8 @@ python backend/make_seed.py --refresh
 - `backend/spx/s3fits.py` reads a cutout from a FITS file on S3 with byte-range requests.
 - `backend/spx/tanwcs.py` is a small TAN-SIP world coordinate implementation in NumPy.
 - `backend/spx/stack.py` groups exposures into epochs and stacks them.
+- `backend/spx/wave.py` gives the wavelength of each detector pixel (from the WCS-WAVE
+  extension of the SPHEREx files); `backend/spx/spectrum.py` does the photometry.
 - `backend/app.py` is the HTTP API; `frontend/` is the viewer (plain HTML, CSS and JavaScript).
 
 ## Data and software credits

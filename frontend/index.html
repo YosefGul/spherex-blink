@@ -41,12 +41,17 @@
     <dl id="meta" class="kv"></dl>
     <h2>Cursor</h2>
     <dl id="cursor" class="kv"><dt>Position</dt><dd class="mono">–</dd><dt>Value</dt><dd class="mono">–</dd></dl>
+    <h2>Spectrum at the marker</h2>
+    <canvas id="spec" class="spec" aria-label="Spectrum at the marked spot: brightness against wavelength"></canvas>
+    <p id="specHover" class="note mono">&nbsp;</p>
+    <p id="specInfo" class="note"></p>
+    <button id="specCsv" class="ghost" type="button" hidden>Download spectrum (CSV)</button>
     <h2>Display</h2>
     <label class="row">Upper limit <span id="hiVal" class="mono"></span>
       <input id="hi" type="range" min="4" max="80" value="12"></label>
     <label class="row">Difference against
       <select id="ref"></select></label>
-    <p class="note">Consecutive SPHEREx exposures of one spot are taken at different wavelengths. Each image here is the average of every exposure from one detector within one epoch, so epochs can be compared. Double-click the image to re-centre.</p>
+    <p class="note">Consecutive SPHEREx exposures of one spot are taken at different wavelengths. Each image here is the average of every exposure from one detector within one epoch, so epochs can be compared. Click the image to measure the spectrum of that spot; double-click to re-centre.</p>
     <p class="note keys"><kbd>←</kbd><kbd>→</kbd> epoch · <kbd>Space</kbd> play · <kbd>1</kbd>–<kbd>6</kbd> band · <kbd>B</kbd> <kbd>D</kbd> <kbd>S</kbd> mode</p>
   </aside>
 </main>
