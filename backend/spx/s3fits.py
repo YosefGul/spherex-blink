@@ -31,8 +31,16 @@ def _session() -> requests.Session:
 
 
 def _range(url: str, start: int, end: int) -> tuple[bytes, int]:
-    """Bytes [start, end] inclusive, plus the total file size."""
-    r = _session().get(url, headers={"Range": f"bytes={start}-{end}"}, timeout=60)
+    """Bytes [start, end] inclusive, plus the total file size. A dropped connection is tried again."""
+    for attempt in range(3):
+        try:
+            r = _session().get(url, headers={"Range": f"bytes={start}-{end}"}, timeout=60)
+            if r.status_code >= 500 and attempt < 2:
+                continue
+            break
+        except (requests.ConnectionError, requests.Timeout):
+            if attempt == 2:
+                raise
     r.raise_for_status()
     total = int(r.headers["Content-Range"].rsplit("/", 1)[1])
     return r.content, total

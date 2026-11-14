@@ -27,7 +27,7 @@
     <span class="t-micro c-3 hide-md">Field</span>
     <div id="fov" class="seg" role="group" aria-label="Field of view">
       <button type="button" data-fov="120">2′</button><button type="button" data-fov="240">4′</button><button type="button" data-fov="600">10′</button>
-      <button type="button" disabled title="Wider fields need a server mode that does not exist yet">30′</button><button type="button" disabled title="Wider fields need a server mode that does not exist yet">1°</button>
+      <button type="button" data-fov="1800" title="Wide field: detector pixels, slower to load">30′</button><button type="button" data-fov="3600" title="Wide field: detector pixels, slower to load">1°</button>
     </div>
     <theme-toggle></theme-toggle>
     <button id="shareBtn" class="pill" type="button" aria-haspopup="menu" aria-expanded="false"><x-ico name="link" size="14"></x-ico>Share</button>
@@ -82,8 +82,8 @@
         <button type="button" class="layer" data-layer="gaia"><i class="mk gaia"></i>Gaia DR3</button>
         <button type="button" class="layer" data-layer="catwise"><i class="mk catwise"></i>CatWISE</button>
         <button type="button" class="layer" data-layer="trail">Trail</button>
-        <button type="button" class="layer" disabled title="The pixel-quality flags are not read yet">Flags</button>
-        <button type="button" class="layer" disabled title="The zodiacal-light model is not used yet">Zodi removed</button>
+        <button type="button" class="layer" data-layer="flags" title="Pixels that the SPHEREx pipeline flagged in the exposures of this visit">Flags</button>
+        <button type="button" class="layer" data-layer="zodi" title="Remove only the modelled zodiacal light instead of the whole background">Zodi removed</button>
       </div>
       <label class="cut" id="cut"><span class="t-caption c-3">Cut-off</span><input id="hi" type="range" min="0" max="100" value="14" aria-label="Brightness cut-off"><span id="hiVal" class="t-mono"></span></label>
     </div>
@@ -104,6 +104,9 @@
     <div id="secSpectrum" class="sec-col">
       <div class="row between"><h2 class="t-label">Spectrum at the marker</h2><button id="specCsv" class="pill sm" type="button" hidden><x-ico name="download" size="12"></x-ico>CSV</button></div>
       <div class="chart sky"><canvas id="spec" aria-label="Spectrum at the marked spot: brightness against wavelength"></canvas><p id="specInfo" class="t-caption c-3"></p><p id="specHover" class="t-mono c-2"></p></div>
+      <div class="row between"><span class="t-caption c-3">Show</span>
+        <div id="specBin" class="seg tabs" role="group" aria-label="Spectrum points"><button type="button" data-bin="1" title="Median per spectral channel: 17 channels in each of the six bands">102 channels</button><button type="button" data-bin="0" title="One point per exposure">Exposures</button></div>
+      </div>
       <div class="row between"><span class="t-caption c-3">Aperture radius</span>
         <div id="aper" class="seg tabs" role="group" aria-label="Aperture radius"><button type="button" data-aper="1">6″</button><button type="button" data-aper="1.5">9″</button><button type="button" data-aper="2">12″</button><button type="button" data-aper="2.5">15″</button><button type="button" data-aper="3">18″</button></div>
       </div>

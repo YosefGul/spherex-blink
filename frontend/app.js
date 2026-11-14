@@ -14,8 +14,12 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;",
 
 const S = { ra: 331.096, dec: -56.801, fov: 240, det: 5, mode: "blink", axis: "epochs", ep: 0, ref: 0, hi: 12, hiAuto: true,
   fps: 2, timer: null, meta: null, stacks: {}, pending: {}, token: 0, abort: null, state: null, t0: 0, clock: null,
-  pick: null, pickNext: null, aper: 2, spec: null, specState: "", specDrawn: [],
-  ov: { gaia: true, catwise: true, trail: true }, cats: {}, catState: {}, ovDrawn: [] };
+  pick: null, pickNext: null, aper: 2, spec: null, specState: "", specDrawn: [], specBin: true,
+  ov: { gaia: true, catwise: true, trail: true, flags: false, zodi: false }, cats: {}, catState: {}, ovDrawn: [],
+  qual: {}, qualState: {} };
+const WIDE = 600;                 // fields wider than this (arcsec) are on detector pixels and cost far more to read
+const OV_KEYS = ["gaia", "catwise", "flags", "zodi"], OV_DEFAULT = "gaia,catwise";
+const INFO_FLAGS = ["FULLSAMPLE", "SOURCE"];   // flags that describe a pixel without calling it bad
 
 // Small hub so that discover.js can draw on the image and follow the state without this file knowing about it.
 const App = {
@@ -98,12 +102,16 @@ function pixToSky(ix, iy, n, ps) {
   const dec = Math.atan2(Math.sin(d0) + eta * Math.cos(d0), Math.hypot(xi, den)) / D2R;
   return { ra: (ra + 360) % 360, dec };
 }
-// A patch near one of the ecliptic poles, where SPHEREx returns most often. No coverage is known in advance.
+// A random patch of sky. Two regions are left out: the ecliptic poles, where SPHEREx has thousands of
+// exposures and the archive query alone takes minutes, and the Milky Way, where every pixel holds several stars.
 function randomPatch() {
-  const south = Math.random() < 0.5, r = 2.5 * Math.sqrt(Math.random()), th = 2 * Math.PI * Math.random();
-  const dec = (south ? -66.56 : 66.56) + r * Math.sin(th);
-  const ra = ((south ? 90 : 270) + r * Math.cos(th) / Math.cos(dec * D2R) + 360) % 360;
-  return { ra, dec };
+  const eps = 23.4393 * D2R, gra = 192.85948 * D2R, gdec = 27.12825 * D2R;
+  for (;;) {
+    const ra = 360 * Math.random(), dec = Math.asin(2 * Math.random() - 1) / D2R, a = ra * D2R, d = dec * D2R;
+    const beta = Math.asin(Math.sin(d) * Math.cos(eps) - Math.cos(d) * Math.sin(eps) * Math.sin(a)) / D2R;
+    const b = Math.asin(Math.sin(d) * Math.sin(gdec) + Math.cos(d) * Math.cos(gdec) * Math.cos(a - gra)) / D2R;
+    if (Math.abs(beta) < 70 && Math.abs(b) > 15) return { ra, dec };
+  }
 }
 
 // ---------- states over the image: loading, no coverage, archive error ----------
@@ -119,7 +127,7 @@ function setState(kind, detail = "") {
     const steps = ["Find the exposures of this position", `Read and stack the D${S.det} exposures`, "Draw the visits"];
     el.innerHTML = `<h2 class="t-title">Loading ${where}</h2>
       <div class="loader"><ol>${steps.map((s, i) => `<li class="${i < detail ? "done" : i === detail ? "now" : ""}"><i>${i < detail ? ico("check", 10) : ""}</i>${s}</li>`).join("")}</ol>
-      <p class="t-caption c-3" style="margin:0"><span id="elapsed">0 s</span> so far. A new position takes about 30 s the first time; after that it is instant.</p></div>
+      <p class="t-caption c-3" style="margin:0"><span id="elapsed">0 s</span> so far. ${S.fov > WIDE ? "A wide field reads several megabytes per exposure: allow a minute or two the first time." : "A new position takes about 30 s the first time; after that it is instant."}</p></div>
       <p class="t-caption c-3" style="margin:0">Or open a test target</p>${targetButtons()}
       <button type="button" class="pill" data-act="cancel">Cancel</button>`;
     const tick = () => { const e = $("elapsed"); if (e) e.textContent = `${Math.round((performance.now() - S.t0) / 1000)} s`; };
@@ -146,7 +154,7 @@ async function load() {
   const token = ++S.token;
   stop();
   S.abort?.abort(); S.abort = new AbortController();
-  S.meta = null; S.stacks = {}; S.pending = {}; S.cats = {}; S.catState = {};
+  S.meta = null; S.stacks = {}; S.pending = {}; S.cats = {}; S.catState = {}; S.qual = {}; S.qualState = {};
   S.pick = S.pickNext || { ra: S.ra, dec: S.dec }; S.pickNext = null;
   S.spec = null; S.specState = ""; S.hiAuto = true; S.hi = 12; S.t0 = performance.now();
   writeUrl(); buildMatrix(); buildTrack(); App.emit("reset");
@@ -164,11 +172,23 @@ async function load() {
     await ensureDet(S.det, token);
     // Each exposure costs ~0.5 MB of archive reads. Fill the other rows of the matrix
     // only where that is cheap; elsewhere a band loads when it is selected.
-    if (meta.total_frames <= PREFETCH_MAX_FRAMES)
+    if (meta.total_frames <= PREFETCH_MAX_FRAMES && S.fov <= WIDE)
       for (const d of DETS) if (token === S.token) await ensureDet(d, token);
+    if (meta.refreshing) setTimeout(() => recheck(token, meta.total_frames), 45000);
   } catch (e) {
     if (token === S.token && e.name !== "AbortError") { setState("error", e.message); render(); }
   }
+}
+// The list of exposures was older than a week, so the server asked the archive again. See whether it grew.
+async function recheck(token, total) {
+  if (token !== S.token) return;
+  try {
+    const m = await api(`/api/epochs?ra=${S.ra}&dec=${S.dec}`);
+    if (token !== S.token) return;
+    if (m.refreshing) setTimeout(() => recheck(token, total), 45000);
+    else if (m.total_frames !== total) { toast("The archive has new exposures here. Loading them."); S.pickNext = S.pick; load(); }
+    else { S.meta.index_age_days = m.index_age_days; render(); }
+  } catch { /* the next visit asks again */ }
 }
 function ensureDet(det, token = S.token) {
   if (S.stacks[det]) return Promise.resolve();
@@ -193,18 +213,91 @@ async function loadDet(det, token) {
   render();
 }
 
+// ---------- quality data: pixel flags and the zodiacal-light model ----------
+async function loadQual(det) {
+  const token = S.token;
+  S.qualState[det] = "loading";
+  try {
+    const r = await api(`/api/quality?ra=${S.ra}&dec=${S.dec}&fov=${S.fov}&det=${det}`);
+    if (token !== S.token) return;
+    S.qual[det] = { n: r.n, epochs: r.epochs.map(e => e && { ...e, flag: Sky.bytes(e.flag) }) };
+    S.qualState[det] = "ok";
+  } catch (e) {
+    if (token !== S.token || e.name === "AbortError") return;
+    S.qualState[det] = "error";
+    toast(`The quality data could not be read: ${e.message}`);
+  }
+  render();
+}
+function shownQual() {          // the visits that the image on screen is made of
+  const q = S.qual[S.det];
+  if (!q) return [];
+  return (S.mode === "stack" ? q.epochs : S.mode === "diff" ? [q.epochs[S.ep], q.epochs[S.ref]] : [q.epochs[S.ep]]).filter(Boolean);
+}
+function flagMap() {            // per pixel: share of the exposures (0..255) in which it is flagged
+  const q = S.qual[S.det];
+  if (!q) return null;
+  const key = `${S.mode}:${S.ep}:${S.ref}`;
+  if (q.key !== key) {
+    q.key = key;
+    const use = shownQual().map(e => e.flag);
+    if (!use.length) q.map = null;
+    else if (use.length === 1) q.map = use[0];
+    else { q.map = new Uint8Array(use[0].length); for (let p = 0; p < q.map.length; p++) { let s = 0; for (const f of use) s += f[p]; q.map[p] = s / use.length; } }
+    q.share = 0;
+    if (q.map) { let s = 0; for (let p = 0; p < q.map.length; p++) s += q.map[p]; q.share = s / q.map.length / 255; }
+  }
+  return q.map;
+}
+// A cosmic-ray hit flags a pixel in one exposure and the stack rejects it, so nearly every pixel is flagged
+// somewhere. Only pixels flagged in at least this share of the exposures are painted.
+const FLAG_SHOWN = 0.2;
+const offFlags = document.createElement("canvas");
+function paintFlags(map, n) {
+  offFlags.width = offFlags.height = n;
+  const ctx = offFlags.getContext("2d"), id = ctx.createImageData(n, n), px = id.data;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const v = map[j * n + i], o = ((n - 1 - j) * n + i) * 4;
+    px[o] = 255; px[o + 1] = 64; px[o + 2] = 160; px[o + 3] = v >= FLAG_SHOWN * 255 ? 50 + 110 * v / 255 : 0;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+// The stacks have each exposure's whole background removed. Adding back the difference between that
+// background and the zodiacal model leaves an image with only the zodiacal light taken out.
+function zodiImage(st, q, i) {
+  const e = st.epochs[i], k = q.epochs[i];
+  if (!e?.img || !k) return null;
+  if (!e.zimg) {
+    const n = st.n, c = k.corr, out = new Float32Array(e.img.length);
+    for (let j = 0; j < n; j++) {
+      const v = j / (n - 1) * 2, a = Math.min(1, Math.floor(v)), fv = v - a;
+      for (let x = 0; x < n; x++) {
+        const u = x / (n - 1) * 2, b = Math.min(1, Math.floor(u)), fu = u - b;
+        out[j * n + x] = e.img[j * n + x] + (c[a][b] * (1 - fu) + c[a][b + 1] * fu) * (1 - fv) + (c[a + 1][b] * (1 - fu) + c[a + 1][b + 1] * fu) * fv;
+      }
+    }
+    e.zimg = out;
+  }
+  return e.zimg;
+}
+
 // ---------- image ----------
 const off = document.createElement("canvas");
 
 function currentImage(det = S.det) {
   const st = S.stacks[det];
   if (!st) return null;
-  const E = st.epochs;
-  if (S.mode === "stack") return st.mean && { img: st.mean, div: false };
+  const q = S.ov.zodi ? S.qual[det] : null;
+  const E = q ? st.epochs.map((e, i) => ({ img: zodiImage(st, q, i) || e.img })) : st.epochs;
+  if (S.mode === "stack") {
+    if (q) st.zmean ??= Sky.mean(E.map(e => e.img));
+    const m = q ? st.zmean : st.mean;
+    return m && { img: m, div: false };
+  }
   if (S.mode === "diff") {
     const a = E[S.ep]?.img, b = E[S.ref]?.img;
     if (!a || !b) return null;
-    const key = `${S.ep}:${S.ref}`;
+    const key = `${S.ep}:${S.ref}:${q ? "z" : ""}`;
     if (st.diff?.key !== key) {
       const d = new Float32Array(a.length);
       for (let p = 0; p < d.length; p++) d[p] = a[p] - b[p];
@@ -227,6 +320,7 @@ function toScreen(ra, dec) {
 function render() {
   const c = $("view"), dpr = window.devicePixelRatio || 1, box = $("image").getBoundingClientRect();
   const st = S.stacks[S.det], cur = currentImage();
+  if ((S.ov.flags || S.ov.zodi) && st && !S.qualState[S.det]) loadQual(S.det);
   if (box.width) {
     c.width = Math.max(1, Math.round(box.width * dpr)); c.height = Math.max(1, Math.round(box.height * dpr));
     const ctx = c.getContext("2d");
@@ -236,6 +330,8 @@ function render() {
       Sky.paint(off, cur, st.n, st.sigma, S.hi);
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(off, x0, y0, side, side);
+      const fl = S.ov.flags && flagMap();
+      if (fl) { paintFlags(fl, st.n); ctx.drawImage(offFlags, x0, y0, side, side); }
       drawOverlay(ctx, x0, y0, side, dpr);
     }
   }
@@ -261,11 +357,11 @@ function drawOverlay(ctx, x0, y0, side, dpr) {
   }
   ctx.restore();
   // scale bar and compass, bottom right
-  const arc = S.fov <= 150 ? 15 : S.fov <= 400 ? 30 : 60, len = side / S.fov * arc;
+  const arc = S.fov <= 150 ? 15 : S.fov <= 400 ? 30 : S.fov <= 900 ? 60 : S.fov <= 2400 ? 300 : 600, len = side / S.fov * arc;
   const bx = x0 + side - 84 * dpr, by = y0 + side - 34 * dpr;
   ctx.fillStyle = "#fafafa"; ctx.fillRect(bx - len, by, len, 2 * dpr);
   ctx.font = `${12 * dpr}px "JetBrains Mono", ui-monospace, monospace`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-  ctx.fillText(`${arc}″`, bx - len / 2, by + 17 * dpr);
+  ctx.fillText(arc < 60 ? `${arc}″` : `${arc / 60}′`, bx - len / 2, by + 17 * dpr);
   const ox = x0 + side - 30 * dpr, oy = y0 + side - 22 * dpr, a = 28 * dpr;
   ctx.strokeStyle = "#fafafa"; ctx.lineWidth = 1.4 * dpr; ctx.beginPath();
   ctx.moveTo(ox, oy); ctx.lineTo(ox, oy - a); ctx.moveTo(ox, oy); ctx.lineTo(ox - a, oy); ctx.stroke();
@@ -288,8 +384,13 @@ function renderLabels(st, cur) {
     $("epochLabel").textContent = e.label;
     $("subLabel").textContent = st ? `${band} · stack of ${used} frame${used === 1 ? "" : "s"}` : band;
   }
-  $("legend").textContent = S.mode === "diff" && cur ? `blue: brighter in ${eps[S.ref].label} · red: brighter in ${e.label}`
-    : st && !cur && !S.state ? `No D${S.det} exposures in this visit.` : "";
+  const notes = [];
+  if (S.mode === "diff" && cur) notes.push(`blue: brighter in ${eps[S.ref].label} · red: brighter in ${e.label}`);
+  else if (st && !cur && !S.state) notes.push(`No D${S.det} exposures in this visit.`);
+  if (cur && S.ov.flags && S.qual[S.det]) notes.push(`pink: flagged in ${FLAG_SHOWN * 100}% or more of the exposures`);
+  if (cur && S.ov.zodi && S.qual[S.det]) notes.push("only the zodiacal model removed");
+  if (cur && (S.ov.flags || S.ov.zodi) && S.qualState[S.det] === "loading") notes.push("reading the quality data…");
+  $("legend").textContent = notes.join(" · ");
 }
 function renderFacts(st) {
   const eps = S.meta?.epochs || [], e = eps[S.ep], rows = [];
@@ -297,7 +398,18 @@ function renderFacts(st) {
     const all = S.mode === "stack", yr = m => mjdDate(m).getUTCFullYear(), a = all ? eps[0].mjd_min : e.mjd_min, b = all ? eps[eps.length - 1].mjd_max : e.mjd_max;
     rows.push(["Band", `D${S.det} · ${BANDS[S.det]}`], ["Visit", `${dayMonth(a)}${yr(a) === yr(b) ? "" : ` ${yr(a)}`} – ${dayMonth(b)} ${yr(b)}`]);
     if (st) rows.push(["Exposures", `${all ? st.epochs.reduce((s, x) => s + x.used, 0) : st.epochs[S.ep].used} averaged`], ["Noise (1σ)", `${st.sigma.toExponential(2)} MJy/sr`], ["Pixel", `${st.pixscale.toFixed(2)}″ (native 6.15″)`]);
-    rows.push(["Archive", `through ${dayMonth(eps[eps.length - 1].mjd_max)} ${yr(eps[eps.length - 1].mjd_max)}`]);
+    const ql = (S.ov.flags || S.ov.zodi) ? shownQual() : [];
+    if (ql.length) {
+      flagMap();
+      const avg = f => ql.reduce((s, x) => s + f(x), 0) / ql.length, names = {};
+      for (const x of ql) for (const [k, v] of Object.entries(x.names)) if (!INFO_FLAGS.includes(k)) names[k] = (names[k] || 0) + v / ql.length;
+      const top = Object.entries(names).sort((p, r) => r[1] - p[1]).slice(0, 3).map(([k, v]) => `${k.toLowerCase().replace(/_/g, " ")} ${v >= 0.0995 ? (v * 100).toFixed(0) : (v * 100).toFixed(1)}%`);
+      const left = avg(x => x.corr[1][1]);
+      rows.push(["Flagged", `${(S.qual[S.det].share * 100).toFixed(1)}% of pixel readings${top.length ? ` · ${top.join(", ")}` : ""}`],
+        ["Zodiacal light", `${avg(x => x.zodi).toFixed(3)} MJy/sr (model)`], ["Sky left over", `${left >= 0 ? "+" : "−"}${Math.abs(left).toFixed(3)} MJy/sr`]);
+    }
+    const age = S.meta.index_age_days;
+    rows.push(["Archive", `through ${dayMonth(eps[eps.length - 1].mjd_max)} ${yr(eps[eps.length - 1].mjd_max)}${age == null ? "" : ` · list checked ${age < 1 ? "today" : `${Math.round(age)} d ago`}`}`]);
   } else rows.push(["Centre", fmtPos(S.ra, S.dec)]);
   $("facts").innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
 }
@@ -452,24 +564,50 @@ function renderSpectrum() {
   ctx.textAlign = "left"; ctx.fillText("mJy", 6 * dpr, 10 * dpr);
 
   const lit = p => S.mode === "stack" || p.epoch === S.ep || (S.mode === "diff" && p.epoch === S.ref);
-  const colors = Array.from({ length: n }, (_, i) => epochColor(i, n));
+  const colors = Array.from({ length: n }, (_, i) => epochColor(i, n)), bin = S.specBin;
   for (const pass of [false, true]) {           // dimmed visits first, the shown visit on top
     for (const p of pts) {
       if (lit(p) !== pass) continue;
-      const px = x(p.wavelength), py = y(p.flux);
-      ctx.globalAlpha = pass ? 1 : 0.25; ctx.fillStyle = ctx.strokeStyle = colors[p.epoch] || muted;
-      if (pass && p.error > (hi - lo) * 0.03) { ctx.beginPath(); ctx.moveTo(px, y(p.flux - p.error)); ctx.lineTo(px, y(p.flux + p.error)); ctx.stroke(); }
-      ctx.beginPath(); ctx.arc(px, py, (pass ? 2.2 : 1.8) * dpr, 0, 2 * Math.PI); ctx.fill();
-      if (pass) S.specDrawn.push({ px: px / dpr, py: py / dpr, p });
+      const px = x(p.wavelength), py = y(p.flux), strong = pass && !bin;
+      ctx.globalAlpha = strong ? 1 : pass ? 0.35 : bin ? 0.12 : 0.25; ctx.fillStyle = ctx.strokeStyle = colors[p.epoch] || muted;
+      if (strong && p.error > (hi - lo) * 0.03) { ctx.beginPath(); ctx.moveTo(px, y(p.flux - p.error)); ctx.lineTo(px, y(p.flux + p.error)); ctx.stroke(); }
+      ctx.beginPath(); ctx.arc(px, py, (strong ? 2.2 : bin ? 1.5 : 1.8) * dpr, 0, 2 * Math.PI); ctx.fill();
+      if (strong) S.specDrawn.push({ px: px / dpr, py: py / dpr, p });
     }
   }
   ctx.globalAlpha = 1;
+  if (bin) {                                     // one value per spectral channel, joined within each band
+    const ch = specChannels(pts.filter(lit)), ink = skyVar("--text-primary");
+    ctx.lineWidth = 1.5 * dpr; ctx.lineJoin = "round";
+    for (let i = 0; i < ch.length; i++) {
+      const c = ch[i], prev = ch[i - 1], px = x(c.wavelength), py = y(c.flux);
+      ctx.fillStyle = ctx.strokeStyle = c.g < 0 ? ink : colors[c.g] || muted;
+      if (prev && prev.g === c.g && prev.det === c.det) { ctx.beginPath(); ctx.moveTo(x(prev.wavelength), y(prev.flux)); ctx.lineTo(px, py); ctx.stroke(); }
+      ctx.beginPath(); ctx.arc(px, py, 2.4 * dpr, 0, 2 * Math.PI); ctx.fill();
+      S.specDrawn.push({ px: px / dpr, py: py / dpr, c });
+    }
+  }
+}
+// SPHEREx has 102 spectral channels: 17 in each of the six bands, equally wide in log wavelength.
+function channelOf(p) {
+  const [a, b] = BAND_UM[p.det], k = Math.floor(Math.log(p.wavelength / a) / Math.log(b / a) * 17);
+  return (p.det - 1) * 17 + Math.min(16, Math.max(0, k));
+}
+function specChannels(pts) {      // median per channel and shown visit (all visits together in Stack mode)
+  const groups = new Map(), med = v => { v.sort((a, b) => a - b); const m = v.length >> 1; return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
+  for (const p of pts) {
+    const g = S.mode === "stack" ? -1 : p.epoch, ch = channelOf(p), key = `${g}:${ch}`;
+    if (!groups.has(key)) groups.set(key, { g, ch, det: p.det, f: [], l: [] });
+    groups.get(key).f.push(p.flux); groups.get(key).l.push(p.wavelength);
+  }
+  return [...groups.values()].map(G => ({ g: G.g, ch: G.ch, det: G.det, n: G.f.length, flux: med(G.f), wavelength: med(G.l) })).sort((a, b) => a.g - b.g || a.ch - b.ch);
 }
 function specHover(ev) {
   const r = $("spec").getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top, el = $("specHover");
   let best = null, bd = 144;
-  for (const d of S.specDrawn) { const k = (d.px - mx) ** 2 + (d.py - my) ** 2; if (k < bd) { bd = k; best = d.p; } }
-  if (best) el.textContent = `${best.wavelength.toFixed(3)} µm · ${best.flux.toPrecision(3)} ± ${best.error.toPrecision(2)} mJy · ${isoDay(best.mjd)} · D${best.det}`;
+  for (const d of S.specDrawn) { const k = (d.px - mx) ** 2 + (d.py - my) ** 2; if (k < bd) { bd = k; best = d.p || d.c; } }
+  if (best?.ch != null) el.textContent = `channel ${best.ch + 1} of 102 · D${best.det} · ${best.wavelength.toFixed(3)} µm · ${best.flux.toPrecision(3)} mJy, median of ${best.n} exposure${best.n === 1 ? "" : "s"}`;
+  else if (best) el.textContent = `${best.wavelength.toFixed(3)} µm · ${best.flux.toPrecision(3)} ± ${best.error.toPrecision(2)} mJy · ${isoDay(best.mjd)} · D${best.det}`;
   else el.textContent = "";
 }
 function download(name, blob) {
@@ -478,8 +616,8 @@ function download(name, blob) {
   a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 function specCsv() {
-  const rows = ["wavelength_um,bandwidth_um,flux_mJy,error_mJy,mjd,detector,visit"];
-  for (const p of S.spec.points) rows.push([p.wavelength, p.bandwidth, p.flux, p.error, p.mjd, p.det, S.meta.epochs[p.epoch].label].join(","));
+  const rows = ["wavelength_um,bandwidth_um,flux_mJy,error_mJy,mjd,detector,visit,channel"];
+  for (const p of S.spec.points) rows.push([p.wavelength, p.bandwidth, p.flux, p.error, p.mjd, p.det, S.meta.epochs[p.epoch].label, channelOf(p) + 1].join(","));
   download(`spherex_spectrum_${S.spec.ra.toFixed(5)}_${S.spec.dec.toFixed(5)}.csv`, new Blob([rows.join("\n") + "\n"], { type: "text/csv" }));
 }
 
@@ -610,8 +748,8 @@ function goTo(ra, dec, det, pick) {
 }
 function pageUrl(extra = {}) {
   const p = new URLSearchParams({ ra: S.ra, dec: S.dec, fov: S.fov, det: S.det, mode: S.mode });
-  const on = ["gaia", "catwise"].filter(k => S.ov[k]);
-  if (on.length < 2) p.set("ov", on.join(",") || "none");     // both catalogues are drawn unless the link says otherwise
+  const on = OV_KEYS.filter(k => S.ov[k]).join(",");
+  if (on !== OV_DEFAULT) p.set("ov", on || "none");           // both catalogues are drawn unless the link says otherwise
   if (S.pick && (Math.abs(S.pick.ra - S.ra) > 1e-6 || Math.abs(S.pick.dec - S.dec) > 1e-6)) { p.set("pra", S.pick.ra.toFixed(5)); p.set("pdec", S.pick.dec.toFixed(5)); }
   if (S.aper !== 2) p.set("ap", S.aper);
   for (const [k, v] of Object.entries(extra)) p.set(k, v);
@@ -624,11 +762,11 @@ function readUrl() {
   const p = new URLSearchParams(location.search), num = k => (p.has(k) && p.get(k) !== "" && Number.isFinite(Number(p.get(k))) ? Number(p.get(k)) : null);
   const hasPos = num("ra") !== null && num("dec") !== null && num("ra") >= 0 && num("ra") < 360 && Math.abs(num("dec")) <= 90;
   if (hasPos) { S.ra = num("ra"); S.dec = num("dec"); }
-  if ([120, 240, 600].includes(num("fov"))) S.fov = num("fov");
+  if ([120, 240, 600, 1800, 3600].includes(num("fov"))) S.fov = num("fov");
   if (num("det") >= 1 && num("det") <= 6) S.det = Math.round(num("det"));
   if (["blink", "diff", "stack"].includes(p.get("mode"))) S.mode = p.get("mode");
   if ([1, 1.5, 2, 2.5, 3].includes(num("ap"))) S.aper = num("ap");
-  if (p.has("ov")) for (const k of ["gaia", "catwise"]) S.ov[k] = p.get("ov").split(",").includes(k);
+  if (p.has("ov")) for (const k of OV_KEYS) S.ov[k] = p.get("ov").split(",").includes(k);
   if (hasPos && num("pra") !== null && num("pdec") !== null) S.pickNext = { ra: num("pra"), dec: num("pdec") };
   document.body.classList.toggle("embed", p.get("embed") === "1");
   return { hasPos, q: (p.get("q") || "").trim(), pick: p.get("pick") === "1", focus: p.get("focus") === "1" };
@@ -642,6 +780,7 @@ function syncControls() {
   press("[data-mode]", b => b.dataset.mode === S.mode);
   press("#axis button", b => b.dataset.axis === S.axis);
   press("#aper button", b => Number(b.dataset.aper) === S.aper);
+  press("#specBin button", b => (b.dataset.bin === "1") === S.specBin);
   press(".layer[data-layer]", b => S.ov[b.dataset.layer]);
   press(".stop", b => Number(b.dataset.ep) === S.ep && S.mode !== "stack");
   $("refRow").hidden = S.mode !== "diff";
@@ -662,12 +801,27 @@ function syncControls() {
   const fr = S.meta?.epochs[S.ep]?.frames;
   document.querySelectorAll("#bandStrip .tile").forEach(c => { c.classList.toggle("on", Number(c.dataset.det) === S.det); c.classList.toggle("none", !!fr && !fr[c.dataset.det]); });
 }
-function layout() {           // the image is a square that fills the height left by the bars
-  const b = $("body"), embed = document.body.classList.contains("embed");
-  if (phone()) { b.style.removeProperty("--stage"); return; }
-  const pad = embed ? 16 : 32, h = b.clientHeight - pad, w = b.clientWidth - pad;
-  const side = embed ? Math.min(h - 44 - 12, w) : Math.min(h - 44 - 48 - 24, w - 280 - 320 - 24);
-  b.style.setProperty("--stage", `${Math.max(280, Math.floor(side))}px`);
+// The image is a square that fills the height left by the bars. The matrix cells grow with it, the
+// findings panel takes the rest up to 1100 px, and on wider screens the three zones are centred.
+function layout() {
+  const b = $("body"), root = document.body.style, embed = document.body.classList.contains("embed"), find = $("findings");
+  const set = (k, v) => (v == null ? root.removeProperty(k) : root.setProperty(k, `${v}px`));
+  if (phone() || embed) {
+    for (const k of ["--cell", "--nav", "--side"]) set(k);
+    find.removeAttribute("data-lay");
+    set("--stage", phone() ? null : Math.max(280, Math.floor(Math.min(b.clientHeight - 16 - 44 - 12, b.clientWidth - 16))));
+    return;
+  }
+  const W = b.clientWidth, H = b.clientHeight, MIN_FIND = 360, MAX_FIND = 1100;
+  let side = H - 32 - 44 - 48 - 24, cell = 44, nav = 280;
+  for (let k = 0; k < 3; k++) {            // the navigator's width depends on the image, and the image on what the navigator leaves
+    cell = Math.min(72, Math.max(44, Math.round(side / 17))); nav = 4 * cell + 104;
+    side = Math.max(280, Math.floor(Math.min(side, W - 32 - nav - MIN_FIND - 24)));
+  }
+  const avail = W - 32 - nav - side - 24, width = Math.min(MAX_FIND, avail);
+  set("--stage", side); set("--cell", cell); set("--nav", nav); set("--side", 16 + Math.max(0, Math.floor((avail - MAX_FIND) / 2)));
+  const lay = width < 760 ? "" : H - 32 >= 1200 ? "stack" : "side";
+  if (lay) find.dataset.lay = lay; else find.removeAttribute("data-lay");
 }
 async function search(text) {
   if (!text.trim()) return;
@@ -693,7 +847,14 @@ function init() {
     const had = !!S.spec || S.specState === "loading";
     S.aper = Number(b.dataset.aper); writeUrl(); render(); loadSpectrum(!had);
   };
-  $("layers").onclick = ev => { const b = ev.target.closest("button[data-layer]"); if (b) { S.ov[b.dataset.layer] = !S.ov[b.dataset.layer]; writeUrl(); render(); } };
+  $("layers").onclick = ev => {
+    const b = ev.target.closest("button[data-layer]");
+    if (!b) return;
+    S.ov[b.dataset.layer] = !S.ov[b.dataset.layer];
+    if (S.qualState[S.det] === "error") delete S.qualState[S.det];     // asking again is how to retry
+    writeUrl(); render();
+  };
+  $("specBin").onclick = ev => { const b = ev.target.closest("button"); if (b) { S.specBin = b.dataset.bin === "1"; render(); } };
   $("matrix").onclick = ev => {
     const c = ev.target.closest(".cell.has, .band");
     if (!c) return;
@@ -720,15 +881,16 @@ function init() {
     const u = ((ev.clientX - r.left) * dpr - x0) / side, v = ((ev.clientY - r.top) * dpr - y0) / side;
     if (u < 0 || u > 1 || v < 0 || v > 1) return null;
     const ix = u * st.n - 0.5, iy = (1 - v) * st.n - 0.5;
-    const val = cur.img[Math.min(st.n - 1, Math.max(0, Math.round(iy))) * st.n + Math.min(st.n - 1, Math.max(0, Math.round(ix)))];
-    return { ...pixToSky(ix, iy, st.n, st.pixscale), val, sigma: cur.sigma || st.sigma };
+    const at = Math.min(st.n - 1, Math.max(0, Math.round(iy))) * st.n + Math.min(st.n - 1, Math.max(0, Math.round(ix)));
+    const val = cur.img[at], fl = S.ov.flags && flagMap();
+    return { ...pixToSky(ix, iy, st.n, st.pixscale), val, sigma: cur.sigma || st.sigma, flag: fl ? fl[at] / 255 : 0 };
   };
   view.onmousemove = ev => {
     const p = pointer(ev), el = $("cursor");
     el.hidden = !p;
     if (!p) return;
     const near = nearestSource(ev);
-    el.innerHTML = `<span>${fmtPos(p.ra, p.dec)}</span><span>${Number.isFinite(p.val) ? `${(p.val / p.sigma).toFixed(1)}σ` : "no data"}</span>${near ? `<span>${esc(near)}</span>` : ""}`;
+    el.innerHTML = `<span>${fmtPos(p.ra, p.dec)}</span><span>${Number.isFinite(p.val) ? `${(p.val / p.sigma).toFixed(1)}σ` : "no data"}</span>${p.flag > 0 ? `<span>flagged in ${Math.max(1, Math.round(p.flag * 100))}% of exposures</span>` : ""}${near ? `<span>${esc(near)}</span>` : ""}`;
   };
   view.onmouseleave = () => ($("cursor").hidden = true);
   let clickTimer = null;   // wait briefly so that a double-click does not also measure a spectrum

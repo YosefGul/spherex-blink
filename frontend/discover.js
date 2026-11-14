@@ -3,7 +3,7 @@
 // Everything here is measured in the browser from the stacked images. It is an aid for the eye, not calibrated astrometry.
 "use strict";
 
-const F = { lastPick: null, anchorNext: null, ep0: null, anchor: null, marked: false, watched: false, savedKey: "", motion: null, motionKey: "", changes: null, changesKey: "", tourStep: 0 };
+const F = { near: {}, lastPick: null, anchorNext: null, ep0: null, anchor: null, marked: false, watched: false, savedKey: "", motion: null, motionKey: "", changes: null, changesKey: "", tourStep: 0 };
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
@@ -178,14 +178,34 @@ App.on("overlay", (ctx, dpr) => {           // measured path of the marked sourc
 
 // ---------- catalogue check ----------
 const MATCH_ARCSEC = 6;
+// A wide field lists only the brightest few hundred sources. For the check, ask again just around the marked spot.
+function nearCats() {
+  if (!S.pick) return;
+  for (const name of ["gaia", "catwise"]) {
+    const k = `${name}:${pickKey()}`;
+    if (!S.cats[name]?.truncated || F.near[k]) continue;
+    F.near[k] = { state: "loading" };
+    const token = S.token;
+    Sky.api(`/api/catalog?name=${name}&ra=${S.pick.ra.toFixed(4)}&dec=${S.pick.dec.toFixed(4)}&fov=120`)
+      .then(r => { F.near[k] = { state: "ok", sources: r.sources }; })
+      .catch(() => { F.near[k] = { state: "error" }; })
+      .finally(() => { if (token === S.token) App.render(); });
+  }
+}
+function catSources(name) {
+  if (!S.cats[name]?.truncated) return { list: S.cats[name]?.sources || [], state: S.catState[name] };
+  const near = F.near[`${name}:${pickKey()}`];
+  return { list: near?.sources || [], state: near?.state || "loading" };
+}
 function catalogueCheck() {
   if (!S.meta?.epochs.length || !S.pick) return null;
+  nearCats();
   const m = motion(), cur = m?.pts?.find(p => p.i === S.ep) || m?.pts?.find(p => p.i === m.anchor), pos = cur || S.pick;
   const year = mjdYear(S.meta.epochs[cur ? cur.i : S.ep].mjd);
   let best = null;
   for (const name of ["gaia", "catwise"]) {
     let near = null;
-    for (const s of S.cats[name]?.sources || []) {
+    for (const s of catSources(name).list) {
       const c = sourceAt(s, year), d = Math.hypot((c.ra - pos.ra) * Math.cos(pos.dec * D2R), c.dec - pos.dec) * 3600;
       if (d > MATCH_ARCSEC) continue;
       // the nearest one, unless a source ten times brighter is also inside the circle: that one fills the SPHEREx pixel
@@ -193,8 +213,8 @@ function catalogueCheck() {
     }
     if (near && (!best || near.d < best.d)) best = near;
   }
-  const st = ["gaia", "catwise"].map(k => S.catState[k]);
-  return { best, loading: st.includes("loading") || st.includes(undefined), failed: ["gaia", "catwise"].filter(k => S.catState[k] === "error") };
+  const st = ["gaia", "catwise"].map(k => catSources(k).state);
+  return { best, loading: st.includes("loading") || st.includes(undefined), failed: ["gaia", "catwise"].filter(k => catSources(k).state === "error") };
 }
 function checkText(c) {
   if (!c) return "";
@@ -376,7 +396,7 @@ function renderFindings() {
   renderTour();
 }
 App.on("reset", () => {
-  F.lastPick = S.pick; F.anchorNext = null; F.ep0 = null; F.anchor = null; F.watched = false; F.savedKey = ""; F.tourStep = 0;
+  F.lastPick = S.pick; F.anchorNext = null; F.ep0 = null; F.anchor = null; F.watched = false; F.savedKey = ""; F.tourStep = 0; F.near = {};
   F.marked = Math.abs(S.pick.ra - S.ra) > 1e-6 || Math.abs(S.pick.dec - S.dec) > 1e-6;
 });
 App.on("render", renderFindings);
@@ -421,13 +441,14 @@ function openPop(anchor, html, width, align) {
 const mi = (icon, title, cap, attrs = "") => `<button type="button" class="mi" role="menuitem" ${attrs}>${icon ? ico(icon, 16) : ""}<span class="tx"><span class="t-label">${title}</span>${cap ? `<span class="t-caption c-3">${cap}</span>` : ""}</span></button>`;
 function startItems() {
   const n = candidates().length;
-  return mi("refresh", "Pick a patch for me", "A random field near an ecliptic pole, where SPHEREx returns most often", 'data-act="pick"')
+  return mi("refresh", "Pick a patch for me", "A random field away from the Milky Way and the crowded ecliptic poles", 'data-act="pick"')
     + `<span class="t-micro c-3 lbl">Test targets</span>`
     + TARGETS.map((t, i) => `<button type="button" class="mi between${Math.abs(t.ra - S.ra) < 1e-4 && Math.abs(t.dec - S.dec) < 1e-4 ? " hl" : ""}" role="menuitem" data-target="${i}"><span class="t-label">${esc(t.long || t.short)}</span><span class="t-caption c-3">${t.kind}</span></button>`).join("")
     + `<hr class="div"><button type="button" class="mi between" role="menuitem" data-act="cands"><span class="row" style="gap:12px">${ico("star", 16)}<span class="t-label">My candidates</span></span><span class="count c-2">${n}</span></button>`;
 }
 function shareItems() {
   return mi("link", "Copy link", "position, band, mode", 'data-act="link"') + mi("code", "Copy embed code", "image and timeline only", 'data-act="embed"')
+    + mi("target", "Open in Aladin Lite", "the same field in other sky surveys", 'data-act="aladin"')
     + mi("image", "Save image", "PNG of this frame", 'data-act="png"') + mi("download", "Save blink", "GIF of all visits · not available yet", "disabled");
 }
 function popAction(ev) {
@@ -440,6 +461,7 @@ function popAction(ev) {
   else if (act === "link") copy(App.pageUrl(), "Link copied");
   else if (act === "embed") copy(`<iframe src="${App.pageUrl({ embed: 1 })}" width="480" height="540" style="border:0" loading="lazy" title="SPHEREx Blink"></iframe>`, "Embed code copied");
   else if (act === "png") $("view").toBlob(b => b && App.download(`spherex_${S.ra.toFixed(4)}_${S.dec.toFixed(4)}_D${S.det}.png`, b), "image/png");
+  else if (act === "aladin") window.open(`https://aladin.cds.unistra.fr/AladinLite/?target=${S.ra.toFixed(5)}%20${S.dec >= 0 ? "%2B" : ""}${S.dec.toFixed(5)}&fov=${(S.fov / 3600 * 1.5).toFixed(3)}&survey=${encodeURIComponent("CDS/P/allWISE/color")}`, "_blank", "noopener");
   else if (act === "help") openHelp();
   else if (act === "theme") Theme.set(Theme.get() === "light" ? "dark" : "light");
 }

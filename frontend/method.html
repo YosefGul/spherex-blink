@@ -15,7 +15,7 @@
 <div class="doc wrap">
   <nav class="toc" aria-label="On this page">
     <p class="t-micro c-3">On this page</p>
-    <a class="on" href="#pipeline">Pipeline</a><a href="#compare">Three ways to compare</a><a href="#spectrum">Spectrum</a><a href="#catalogues">Catalogue marks</a><a href="#limits">Known limits</a>
+    <a class="on" href="#pipeline">Pipeline</a><a href="#compare">Three ways to compare</a><a href="#spectrum">Spectrum</a><a href="#catalogues">Catalogue marks</a><a href="#quality">Flags and zodiacal light</a><a href="#fresh">New data</a><a href="#limits">Known limits</a>
   </nav>
   <main class="doc-main">
     <div class="page-head">
@@ -29,7 +29,7 @@
         <div class="card"><span class="num">1</span><h3 class="t-label">Find the exposures</h3><p class="t-body c-2">The IRSA TAP service lists every SPHEREx exposure that covers the position. For a new position this takes 20 to 30 seconds.</p></div>
         <div class="card"><span class="num">2</span><h3 class="t-label">Read only the pixels needed</h3><p class="t-body c-2">Level 2 images sit in a public Amazon S3 bucket. Byte-range requests fetch just the rows around the target: about 0.5 MB per exposure.</p></div>
         <div class="card"><span class="num">3</span><h3 class="t-label">Group into visits</h3><p class="t-body c-2">Exposures more than 30 days apart form separate epochs. Where coverage is continuous, it is cut into 60-day blocks.</p></div>
-        <div class="card"><span class="num">4</span><h3 class="t-label">Stack per band</h3><p class="t-body c-2">For each of the six bands and each epoch, all exposures are averaged onto one north-up grid of 3.075″ pixels.</p></div>
+        <div class="card"><span class="num">4</span><h3 class="t-label">Stack per band</h3><p class="t-body c-2">For each of the six bands and each epoch, all exposures are averaged onto one north-up grid of 3.075″ pixels (6.15″, the detector’s own, for the 30′ and 1° fields).</p></div>
       </div>
     </section>
     <section id="compare">
@@ -42,19 +42,28 @@
     </section>
     <section id="spectrum">
       <h2 class="t-title">Spectrum</h2>
-      <p class="t-body c-2">Each exposure sees a spot through a different part of SPHEREx’s linear variable filter, so each exposure gives one point: a wavelength and a brightness. The points of all six detectors together cover 0.75 to 5 µm. They are coloured by epoch and can be downloaded as CSV.</p>
+      <p class="t-body c-2">Each exposure sees a spot through a different part of SPHEREx’s linear variable filter, so each exposure gives one point: a wavelength and a brightness. The points of all six detectors together cover 0.75 to 5 µm. They are coloured by epoch and can be downloaded as CSV. The chart can also show the median in each of the 102 spectral channels: 17 per band, equally wide in log wavelength.</p>
       <p class="t-body c-2">The flux is an aperture sum minus the median of a surrounding ring. No aperture correction is applied. Exposures with saturated pixels in the aperture are skipped.</p>
     </section>
     <section id="catalogues">
       <h2 class="t-title">Catalogue marks</h2>
       <p class="t-body c-2">Gaia DR3 and CatWISE2020 sources are drawn where the catalogue’s proper motion puts each of them on the date of the epoch shown. A mark that follows a star from visit to visit confirms the motion independently. Sources with a well-measured motion above 0.15″ per year get a trail and a label.</p>
     </section>
+    <section id="quality">
+      <h2 class="t-title">Quality flags and zodiacal light</h2>
+      <p class="t-body c-2">Every SPHEREx file carries a flag for each pixel (cosmic-ray hit, halo of a bright star, persistence, non-functional pixel and others) and a model of the zodiacal light. The Flags layer paints the pixels that are flagged in a fifth or more of the exposures of the visit shown; the panel on the left names the flags that occur and how much of the field they touch.</p>
+      <p class="t-body c-2">The stacks have the whole background of each exposure removed. “Zodi removed” takes out only the modelled zodiacal light, so what is left of the sky stays in the image, and the panel gives both levels in MJy/sr.</p>
+    </section>
+    <section id="fresh">
+      <h2 class="t-title">New data</h2>
+      <p class="t-body c-2">SPHEREx data reach the archive every week. When the stored list of exposures for a position is more than seven days old, the tool shows what it has and asks the archive again in the background; new exposures are loaded as soon as they are found.</p>
+    </section>
     <section id="limits">
       <h2 class="t-title">Known limits</h2>
       <div class="card rows">
-        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The pixel-quality flags and the zodiacal-light model in the SPHEREx files are not used yet. The background is removed with a clipped median of each cutout.</p></div>
+        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The quality flags are shown, not applied: flagged pixels still enter the stacks. The stack is a clipped mean, which already drops a pixel that is off in a single exposure.</p></div>
         <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">Very bright stars have empty (saturated) cores in some bands.</p></div>
-        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The field of view is at most 10 arcminutes: too small to search for a distant planet that would move by many arcminutes between visits.</p></div>
+        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">In the 30′ and 1° fields the other bands load only when chosen, the catalogue marks are the 400 brightest sources, and the corners can have fewer exposures than the centre.</p></div>
         <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The spectrum aperture is wider than the image resolution, so a neighbour within about 12″ is included in the measurement.</p></div>
         <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The motion of a marked source and the list of changes are measured in the browser from the stacked images. They are aids for the eye, not calibrated astrometry or photometry.</p></div>
       </div>

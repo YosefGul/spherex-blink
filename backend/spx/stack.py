@@ -20,6 +20,19 @@ from .s3fits import Cutout, read_cutout
 from .tanwcs import TanWCS, clipped_mean_stack, clipped_median, sky_grid
 
 NATIVE_PIX = 6.15  # arcsec
+FINE_FOV = 600.0   # up to this field of view the grid is twice as fine as the detector pixels
+
+
+def grid_pixscale(fov_arcsec: float) -> float:
+    """Pixel size of the common sky grid, arcsec. Wide fields keep the detector's own pixel size:
+    a finer grid would only make the images four times larger."""
+    return NATIVE_PIX / 2 if fov_arcsec <= FINE_FOV else NATIVE_PIX
+
+
+def cutout_half(fov_arcsec: float) -> int:
+    """Half-size of the cutouts in native pixels, with a margin for field rotation.
+    Stacks, spectra and quality data all use it, so they share the cutout cache."""
+    return int(np.ceil(fov_arcsec / NATIVE_PIX / 2 * 1.45)) + 3
 
 
 @dataclass
@@ -67,8 +80,8 @@ def build(ra: float, dec: float, fov_arcsec: float, cache_dir: Path,
     failed: list[str] = []
     groups = split_epochs(query_frames(ra, dec, cache_dir), gap_days)
     wanted = [f for g in groups for f in g if f.detector in detectors]
-    grid, n = sky_grid(ra, dec, fov_arcsec, NATIVE_PIX / 2)
-    half = int(np.ceil(fov_arcsec / NATIVE_PIX / 2 * 1.45)) + 3   # margin for field rotation; keep equal to spectrum.cutout_half
+    grid, n = sky_grid(ra, dec, fov_arcsec, grid_pixscale(fov_arcsec))
+    half = cutout_half(fov_arcsec)
 
     def load(f: Frame):
         try:

@@ -6,6 +6,11 @@ const Sky = {
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return new Float32Array(bytes.buffer);
   },
+  bytes(b64) {                        // base64 to bytes
+    const bin = atob(b64), out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  },
   mean(imgs) {
     const have = imgs.filter(Boolean);
     if (!have.length) return null;

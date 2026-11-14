@@ -15,18 +15,13 @@ import numpy as np
 
 from .index import Frame, query_frames
 from .s3fits import read_cutout
-from .stack import NATIVE_PIX, split_epochs
+from .stack import FINE_FOV, NATIVE_PIX, cutout_half, split_epochs
 from .tanwcs import clipped_median, mad_std
 from .wave import wavelength
 
 APERTURE_PIX = 2.0            # default aperture radius, native pixels (12.3 arcsec)
 ANNULUS_PIX = (4.0, 7.0)      # background annulus, native pixels
 SUB = 5                       # sub-pixel sampling used for the aperture edge
-
-
-def cutout_half(fov_arcsec: float) -> int:
-    """Half-size of the cutouts in native pixels. Must match stack.build so the cache is shared."""
-    return int(np.ceil(fov_arcsec / NATIVE_PIX / 2 * 1.45)) + 3
 
 
 def aperture_flux(data: np.ndarray, px: float, py: float,
@@ -68,10 +63,15 @@ def spectrum(view_ra: float, view_dec: float, fov_arcsec: float, ra: float, dec:
              aperture_pix: float = APERTURE_PIX) -> dict:
     """One point per exposure at (ra, dec), using the cutouts of the view centred on
     (view_ra, view_dec). Fluxes in mJy; no aperture correction is applied, so a smaller
-    aperture keeps neighbours out but loses more of the target's own light."""
+    aperture keeps neighbours out but loses more of the target's own light.
+    In a wide field the view's cutouts are several megabytes each, so small cutouts centred
+    on the spot itself are read instead; the exposures are still those that cover the view centre."""
     groups = split_epochs(query_frames(view_ra, view_dec, cache_dir))
     epoch_of = {f: i for i, g in enumerate(groups) for f in g}
-    half = cutout_half(fov_arcsec)
+    if fov_arcsec > FINE_FOV:
+        view_ra, view_dec, half = ra, dec, cutout_half(240.0)
+    else:
+        half = cutout_half(fov_arcsec)
     failed: list[str] = []
 
     def measure(f: Frame):

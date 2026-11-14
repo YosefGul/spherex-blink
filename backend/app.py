@@ -24,10 +24,10 @@ from fastapi.staticfiles import StaticFiles
 
 import json
 
-from spx import catalog
-from spx.index import query_frames
+from spx import catalog, quality
+from spx.index import age_days, query_frames, refresh_if_old
 from spx.spectrum import spectrum as measure_spectrum
-from spx.stack import NATIVE_PIX, Epoch, build, split_epochs
+from spx.stack import Epoch, build, grid_pixscale, split_epochs
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = Path(os.environ.get("SPX_CACHE_DIR") or ROOT / "data" / "cache")
@@ -35,6 +35,8 @@ SEED = ROOT / "data" / "seed"      # shipped with the code: results for the chal
 WORKERS = int(os.environ.get("SPX_WORKERS", "16"))
 STACK_VERSION = 1                  # bump when stacking changes, so old cached results are ignored
 SPECTRUM_VERSION = 1               # same, for the photometry
+QUALITY_VERSION = 1                # same, for the flag maps and the zodiacal model
+MAX_FOV = 3600.0                   # arcsec: one degree
 
 BANDS = {1: (0.75, 1.09), 2: (1.10, 1.62), 3: (1.63, 2.41), 4: (2.42, 3.82), 5: (3.83, 4.41), 6: (4.42, 5.00)}
 
@@ -136,6 +138,61 @@ def get_stack(ra: float, dec: float, fov: float, det: int, save_to: Path | None 
         return _save_stack(save_to or CACHE, key, total, eps, det, n)
 
 
+def _load_quality(key: str, total_frames: int) -> dict | None:
+    for base in (CACHE, SEED):
+        path = base / "quality" / key
+        if not path.exists():
+            continue
+        try:
+            with np.load(path, allow_pickle=False) as z:
+                if int(z["total_frames"]) != total_frames:
+                    continue
+                return {k: z[k] for k in ("n", "has", "used", "zodi", "corr", "flag", "names")}
+        except Exception as exc:
+            print(f"ignoring {path}: {exc}")
+    return None
+
+
+def get_quality(ra: float, dec: float, fov: float, det: int, save_to: Path | None = None) -> dict:
+    """Flag maps and zodiacal-light numbers per epoch for one detector: cached, shipped, or read from the archive."""
+    total = len(query_frames(ra, dec, CACHE))
+    key = f"q{QUALITY_VERSION}_{ra:.4f}_{dec:+.4f}_{fov:g}_d{det}.npz"
+    hit = _load_quality(key, total)
+    if hit is not None and save_to is None:
+        return hit
+    with _KEY_LOCKS_GUARD:
+        lock = _KEY_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        hit = _load_quality(key, total)
+        if hit is not None and save_to is None:
+            return hit
+        with _BUILD_SLOTS:
+            stats: dict = {}
+            q = quality.build(ra, dec, fov, det, CACHE, workers=WORKERS, stats=stats)
+        eps = [e for e in q["epochs"] if e is not None]
+        n = q["n"]
+        out = {
+            "n": np.int32(n),
+            "has": np.array([e is not None for e in q["epochs"]]),
+            "used": np.array([e["used"] for e in eps], dtype="i4"),
+            "zodi": np.array([e["zodi"] for e in eps], dtype="f8"),
+            "corr": np.array([e["corr"] for e in eps], dtype="f8").reshape(-1, 3, 3),
+            "flag": np.array([e["flag"] for e in eps], dtype="u1").reshape(-1, n, n),
+            "names": np.array([json.dumps(e["names"]) for e in eps]),
+        }
+        if stats["failed"]:
+            if save_to is not None:
+                raise RuntimeError(f"{stats['failed']} exposures could not be read")
+            print(f"{key}: {stats['failed']} exposures could not be read; quality data not cached")
+            return out
+        path = (save_to or CACHE) / "quality" / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.stem}.{threading.get_ident()}.tmp.npz")
+        np.savez_compressed(tmp, total_frames=np.int64(total), **out)
+        os.replace(tmp, path)
+        return out
+
+
 def spectrum_key(ra: float, dec: float, fov: float, pra: float, pdec: float, aper: float = 2.0) -> str:
     size = "" if aper == 2.0 else f"_a{aper:g}"      # the default aperture keeps the original file names
     return f"v{SPECTRUM_VERSION}_{ra:.4f}_{dec:+.4f}_{fov:g}_{pra:.5f}_{pdec:+.5f}{size}.json"
@@ -212,9 +269,12 @@ def epochs(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90)):
         frames = query_frames(ra, dec, CACHE)
     except Exception as exc:
         raise HTTPException(502, f"IRSA metadata query failed: {exc}") from exc
+    age = age_days(CACHE, ra, dec)
+    refreshing = refresh_if_old(ra, dec, CACHE)     # a list older than a week is fetched again in the background
     groups = split_epochs(frames)
     return {
         "ra": ra, "dec": dec, "total_frames": len(frames),
+        "index_age_days": None if age is None else round(age, 2), "refreshing": refreshing,
         "bands": {d: {"min_um": lo, "max_um": hi} for d, (lo, hi) in BANDS.items()},
         "epochs": [_epoch_meta(Epoch(g)) for g in groups],
     }
@@ -222,8 +282,9 @@ def epochs(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90)):
 
 @app.get("/api/stack")
 def stack(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
-          fov: float = Query(240, ge=30, le=600), det: int = Query(ge=1, le=6)):
-    """One stacked image per epoch for one detector, as base64 little-endian float32 (MJy/sr)."""
+          fov: float = Query(240, ge=30, le=MAX_FOV), det: int = Query(ge=1, le=6)):
+    """One stacked image per epoch for one detector, as base64 little-endian float32 (MJy/sr).
+    Fields up to 10 arcmin are on a 3.075 arcsec grid, wider ones on the native 6.15 arcsec."""
     try:
         s = get_stack(ra, dec, fov, det)
     except Exception as exc:
@@ -235,12 +296,37 @@ def stack(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
             data = base64.b64encode(np.asarray(s["cube"][k], dtype="<f4").tobytes()).decode()
             k += 1
         out.append({"label": str(label), "mjd": float(mjd), "used": int(used), "data": data})
-    return {"ra": ra, "dec": dec, "fov": fov, "det": det, "n": int(s["n"]), "pixscale": NATIVE_PIX / 2, "epochs": out}
+    return {"ra": ra, "dec": dec, "fov": fov, "det": det, "n": int(s["n"]), "pixscale": grid_pixscale(fov), "epochs": out}
+
+
+@app.get("/api/quality")
+def quality_api(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
+                fov: float = Query(240, ge=30, le=MAX_FOV), det: int = Query(ge=1, le=6)):
+    """Per epoch, on the same grid as /api/stack: "flag" is a base64 uint8 map, the share of
+    exposures (0-255) in which a pixel carries a quality flag; "names" gives the share of the
+    field each flag touches; "zodi" is the modelled zodiacal light in MJy/sr; "corr" is a 3x3
+    grid (south to north, east to west as in the image) to add to the stack so that only the
+    zodiacal model is removed instead of the whole background."""
+    try:
+        q = get_quality(ra, dec, fov, det)
+    except Exception as exc:
+        raise HTTPException(502, f"could not read the quality data: {exc}") from exc
+    out, k = [], 0
+    for has in q["has"]:
+        if not has:
+            out.append(None)
+            continue
+        out.append({"used": int(q["used"][k]), "zodi": round(float(q["zodi"][k]), 5),
+                    "corr": np.asarray(q["corr"][k]).round(5).tolist(),
+                    "names": json.loads(str(q["names"][k])),
+                    "flag": base64.b64encode(np.asarray(q["flag"][k], dtype="u1").tobytes()).decode()})
+        k += 1
+    return {"ra": ra, "dec": dec, "fov": fov, "det": det, "n": int(q["n"]), "epochs": out}
 
 
 @app.get("/api/spectrum")
 def spectrum(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
-             fov: float = Query(240, ge=30, le=600),
+             fov: float = Query(240, ge=30, le=MAX_FOV),
              pra: float = Query(ge=0, lt=360), pdec: float = Query(ge=-90, le=90),
              cached_only: bool = False, aper: float = Query(2.0, ge=1.0, le=3.0)):
     """One spectrum point per exposure at (pra, pdec), a spot inside the view (ra, dec, fov).
@@ -260,7 +346,7 @@ def spectrum(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
 @app.get("/api/catalog")
 def catalog_api(name: str = Query(pattern="^(gaia|catwise)$"),
                 ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
-                fov: float = Query(240, ge=30, le=600)):
+                fov: float = Query(240, ge=30, le=MAX_FOV)):
     """Gaia DR3 or CatWISE2020 sources in the view, each with position at the catalogue's
     reference epoch (decimal year) and proper motion in mas/yr."""
     try:
