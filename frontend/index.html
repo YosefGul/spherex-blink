@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- AI-assisted code (Claude Code). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPHEREx Blink</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="logo"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="8" cy="11" r="5.5" stroke="#E69F00" stroke-width="1.6"/><circle cx="14" cy="11" r="5.5" stroke="#CC79A7" stroke-width="1.6"/></svg><span>SPHEREx Blink</span></div>
+  <form id="search" class="search">
+    <input id="coord" type="text" spellcheck="false" autocomplete="off" aria-label="Right ascension and declination, or object name" placeholder="RA Dec (deg or hms dms) or object name">
+    <button type="submit">Go</button>
+  </form>
+  <nav id="targets" class="chips" aria-label="Test targets"></nav>
+  <div class="grow"></div>
+  <label class="select">FOV
+    <select id="fov">
+      <option value="120">2′</option><option value="240">4′</option><option value="360">6′</option><option value="600">10′</option>
+    </select>
+  </label>
+  <button id="copy" class="primary" type="button">Copy link</button>
+</header>
+
+<main class="body">
+  <aside id="rail" class="rail" aria-label="Detector band"><h2>Detector band</h2></aside>
+
+  <section class="viewer">
+    <div id="stage" class="stage">
+      <canvas id="view" aria-label="SPHEREx image"></canvas>
+      <div class="overlay tl"><div id="epochLabel" class="epoch"></div><div id="subLabel" class="mono sub"></div></div>
+      <div id="status" class="overlay status" role="status"></div>
+      <div id="legend" class="overlay legend"></div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <h2>Current image</h2>
+    <dl id="meta" class="kv"></dl>
+    <h2>Cursor</h2>
+    <dl id="cursor" class="kv"><dt>Position</dt><dd class="mono">–</dd><dt>Value</dt><dd class="mono">–</dd></dl>
+    <h2>Display</h2>
+    <label class="row">Upper limit <span id="hiVal" class="mono"></span>
+      <input id="hi" type="range" min="4" max="80" value="12"></label>
+    <label class="row">Difference against
+      <select id="ref"></select></label>
+    <p class="note">Consecutive SPHEREx exposures of one spot are taken at different wavelengths. Each image here is the average of every exposure from one detector within one epoch, so epochs can be compared. Double-click the image to re-centre.</p>
+    <p class="note keys"><kbd>←</kbd><kbd>→</kbd> epoch · <kbd>Space</kbd> play · <kbd>1</kbd>–<kbd>6</kbd> band · <kbd>B</kbd> <kbd>D</kbd> <kbd>S</kbd> mode</p>
+  </aside>
+</main>
+
+<footer class="timeline">
+  <button id="play" class="play" type="button" aria-label="Play or pause">▶</button>
+  <div id="track" class="track"></div>
+  <div id="modes" class="seg" role="group" aria-label="Mode">
+    <button data-mode="blink" type="button">Blink</button>
+    <button data-mode="diff" type="button">Difference</button>
+    <button data-mode="stack" type="button">Stack</button>
+  </div>
+  <label class="select">Speed
+    <select id="fps"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="4">4 fps</option></select>
+  </label>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>

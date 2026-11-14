@@ -1,0 +1,7 @@
+.git
+.venv
+.claude
+data/cache
+out
+**/__pycache__
+*.md

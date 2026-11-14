@@ -1,0 +1,3 @@
+# Extra packages for the command-line check scripts (backend/try_target.py).
+-r requirements.txt
+matplotlib==3.11.2
