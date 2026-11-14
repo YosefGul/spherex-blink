@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- AI-assisted code (Claude Code). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API · SPHEREx Blink</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site.css">
+<script src="/site.js"></script>
+</head>
+<body>
+<site-header active="api"></site-header>
+<div class="doc wrap">
+  <nav class="toc" aria-label="On this page">
+    <p class="t-micro c-3">On this page</p>
+    <a class="on" href="#epochs">/api/epochs</a><a href="#stack">/api/stack</a><a href="#spectrum">/api/spectrum</a><a href="#catalog">/api/catalog</a><a href="#health">/api/health</a>
+  </nav>
+  <main class="doc-main api-list">
+    <div class="page-head">
+      <p class="t-micro c-3">API</p>
+      <h1 class="t-heading">Five endpoints, all GET</h1>
+      <p class="t-lead c-2">The viewer itself uses these. Every endpoint answers with JSON; positions are in decimal degrees (ICRS).</p>
+    </div>
+    <article class="card ep" id="epochs">
+      <div class="sig"><span class="t-mono get">GET</span><h2 class="t-title">/api/epochs</h2></div>
+      <p class="t-body c-2">Lists the epochs at a position and the number of exposures per band.</p>
+      <div class="params"><div><span class="t-mono k">ra, dec</span><span class="t-body c-2">position in degrees</span></div></div>
+      <div class="ex"><span class="t-mono c-3">GET</span><span class="t-mono c-2">/api/epochs?ra=331.096&amp;dec=-56.801</span></div>
+    </article>
+    <article class="card ep" id="stack">
+      <div class="sig"><span class="t-mono get">GET</span><h2 class="t-title">/api/stack</h2></div>
+      <p class="t-body c-2">One stacked image per epoch for one band. Images are base64 little-endian float32 in MJy/sr on a 3.075″ grid, row 0 at the south edge.</p>
+      <div class="params">
+        <div><span class="t-mono k">ra, dec</span><span class="t-body c-2">centre of the view in degrees</span></div>
+        <div><span class="t-mono k">fov</span><span class="t-body c-2">field of view in arcseconds, 30 to 600</span></div>
+        <div><span class="t-mono k">det</span><span class="t-body c-2">detector band, 1 to 6</span></div>
+      </div>
+      <div class="ex"><span class="t-mono c-3">GET</span><span class="t-mono c-2">/api/stack?ra=331.096&amp;dec=-56.801&amp;fov=240&amp;det=5</span></div>
+    </article>
+    <article class="card ep" id="spectrum">
+      <div class="sig"><span class="t-mono get">GET</span><h2 class="t-title">/api/spectrum</h2></div>
+      <p class="t-body c-2">One point per exposure at a spot inside the view: wavelength and bandwidth in µm, flux and noise in mJy, date, detector and epoch.</p>
+      <div class="params">
+        <div><span class="t-mono k">ra, dec, fov</span><span class="t-body c-2">the view, as for /api/stack</span></div>
+        <div><span class="t-mono k">pra, pdec</span><span class="t-body c-2">the spot to measure, in degrees</span></div>
+        <div><span class="t-mono k">aper</span><span class="t-body c-2">aperture radius in native pixels, 1 to 3 (default 2)</span></div>
+      </div>
+      <div class="ex"><span class="t-mono c-3">GET</span><span class="t-mono c-2">/api/spectrum?ra=331.096&amp;dec=-56.801&amp;fov=240&amp;pra=331.096&amp;pdec=-56.801&amp;aper=2</span></div>
+    </article>
+    <article class="card ep" id="catalog">
+      <div class="sig"><span class="t-mono get">GET</span><h2 class="t-title">/api/catalog</h2></div>
+      <p class="t-body c-2">Catalogue sources in the view: position at the catalogue’s reference epoch, proper motion in mas/yr and its significance, and a magnitude (G for Gaia, W2 for CatWISE).</p>
+      <div class="params">
+        <div><span class="t-mono k">name</span><span class="t-body c-2">gaia or catwise</span></div>
+        <div><span class="t-mono k">ra, dec, fov</span><span class="t-body c-2">the view, as for /api/stack</span></div>
+      </div>
+      <div class="ex"><span class="t-mono c-3">GET</span><span class="t-mono c-2">/api/catalog?name=gaia&amp;ra=331.096&amp;dec=-56.801&amp;fov=240</span></div>
+    </article>
+    <article class="card ep" id="health">
+      <div class="sig"><span class="t-mono get">GET</span><h2 class="t-title">/api/health</h2></div>
+      <p class="t-body c-2">Reports that the service is running.</p>
+      <div class="ex"><span class="t-mono c-3">GET</span><span class="t-mono c-2">/api/health</span></div>
+    </article>
+  </main>
+</div>
+<site-footer></site-footer>
+</body>
+</html>

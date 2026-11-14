@@ -5,73 +5,64 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SPHEREx Blink</title>
-<link rel="stylesheet" href="style.css">
+<meta name="description" content="Enter a sky position and watch every SPHEREx visit to that patch, one after another, to spot things that move or change.">
+<script>if (/[?&]ra=/.test(location.search)) location.replace("/explore" + location.search);  // links shared before the tool moved to /explore</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site.css">
+<script src="/site.js"></script>
 </head>
 <body>
-<header class="topbar">
-  <div class="logo"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="8" cy="11" r="5.5" stroke="#E69F00" stroke-width="1.6"/><circle cx="14" cy="11" r="5.5" stroke="#CC79A7" stroke-width="1.6"/></svg><span>SPHEREx Blink</span></div>
-  <form id="search" class="search">
-    <input id="coord" type="text" spellcheck="false" autocomplete="off" aria-label="Right ascension and declination, or object name" placeholder="RA Dec (deg or hms dms) or object name">
-    <button type="submit">Go</button>
-  </form>
-  <nav id="targets" class="chips" aria-label="Test targets"></nav>
-  <div class="grow"></div>
-  <label class="select">FOV
-    <select id="fov">
-      <option value="120">2′</option><option value="240">4′</option><option value="360">6′</option><option value="600">10′</option>
-    </select>
-  </label>
-  <button id="copy" class="primary" type="button">Copy link</button>
-</header>
+<site-header></site-header>
+<main>
+  <section class="hero wrap">
+    <div class="pitch">
+      <p class="t-micro c-3">NASA Space Apps 2026 · Planet X and SPHEREx</p>
+      <h1 class="t-display">Watch the infrared sky change.</h1>
+      <p class="t-lead c-2">Enter a sky position. SPHEREx Blink shows every visit of the telescope to that patch, one after another, like a short film. A star that moved jumps. A star that changed brightness flickers.</p>
+      <form class="searchbar" action="/explore" role="search">
+        <input name="q" type="text" spellcheck="false" autocomplete="off" required placeholder="Try 17:57:48.5 +04:41:36" aria-label="Right ascension and declination, or an object name">
+        <button type="submit" aria-label="Open this position"><x-ico name="arrow" size="16"></x-ico></button>
+      </form>
+      <div class="try">
+        <a class="pill sm" href="/explore?pick=1"><x-ico name="refresh" size="14"></x-ico>Pick a patch for me</a>
+        <span class="t-caption c-3">Or open</span>
+        <a class="chip" href="/explore?ra=269.4463&dec=4.768&det=2">Barnard’s Star</a>
+        <a class="chip" href="/explore?ra=331.096&dec=-56.801&det=5">Eps Indi B</a>
+        <a class="chip" href="/explore?ra=133.7598&dec=-7.2422&det=5">WISE 0855−0714</a>
+        <a class="chip" href="/explore?ra=76.9563&dec=30.4014&det=3">RW Aur</a>
+        <a class="chip" href="/explore?ra=248.1675&dec=66.755&det=3">R Dra</a>
+      </div>
+    </div>
+    <a class="preview sky" id="preview" href="/explore?ra=331.096&dec=-56.801&det=5" aria-label="Epsilon Indi B in SPHEREx band D5, one frame per visit. Open in Explore.">
+      <canvas id="pv"></canvas>
+      <div class="scrim"></div>
+      <div class="lab"><b id="pvEpoch">&nbsp;</b><span class="t-mono c-2">Epsilon Indi B · 3.8–4.4 µm</span></div>
+      <div class="visits" id="pvVisits" hidden></div>
+    </a>
+  </section>
 
-<main class="body">
-  <aside id="rail" class="rail" aria-label="Detector band"><h2>Detector band</h2></aside>
-
-  <section class="viewer">
-    <div id="stage" class="stage">
-      <canvas id="view" aria-label="SPHEREx image"></canvas>
-      <div class="overlay tl"><div id="epochLabel" class="epoch"></div><div id="subLabel" class="mono sub"></div></div>
-      <div id="status" class="overlay status" role="status"></div>
-      <div id="legend" class="overlay legend"></div>
+  <section class="sec wrap">
+    <h2 class="t-title">What you can do with it</h2>
+    <div class="cards4">
+      <div class="glow"><span class="ib"><x-ico name="play" size="18"></x-ico></span><div><h3 class="t-title">Blink the visits</h3><p class="t-body c-2">One averaged frame per visit, on one north-up grid.</p></div></div>
+      <div class="glow"><span class="ib"><x-ico name="chart" size="18"></x-ico></span><div><h3 class="t-title">Read a spectrum</h3><p class="t-body c-2">Click any spot: one point per exposure, 0.75–5 µm.</p></div></div>
+      <div class="glow"><span class="ib"><x-ico name="layers" size="18"></x-ico></span><div><h3 class="t-title">Check the catalogues</h3><p class="t-body c-2">Gaia and CatWISE marks move with their proper motion.</p></div></div>
+      <div class="glow"><span class="ib"><x-ico name="link" size="18"></x-ico></span><div><h3 class="t-title">Share the view</h3><p class="t-body c-2">Position, field, band and mode live in the link.</p></div></div>
     </div>
   </section>
 
-  <aside class="panel">
-    <h2>Current image</h2>
-    <dl id="meta" class="kv"></dl>
-    <h2>Cursor</h2>
-    <dl id="cursor" class="kv"><dt>Position</dt><dd class="mono">–</dd><dt>Value</dt><dd class="mono">–</dd><dt>Catalogue</dt><dd class="mono">–</dd></dl>
-    <h2>Spectrum at the marker</h2>
-    <canvas id="spec" class="spec" aria-label="Spectrum at the marked spot: brightness against wavelength"></canvas>
-    <p id="specHover" class="note mono">&nbsp;</p>
-    <p id="specInfo" class="note"></p>
-    <button id="specCsv" class="ghost" type="button" hidden>Download spectrum (CSV)</button>
-    <h2>Display</h2>
-    <label class="row">Upper limit <span id="hiVal" class="mono"></span>
-      <input id="hi" type="range" min="0" max="100" value="14"></label>
-    <label class="row">Difference against
-      <select id="ref"></select></label>
-    <h2>Catalogue overlays</h2>
-    <label class="check"><input id="ovGaia" type="checkbox" data-cat="gaia"><span class="mark gaia"></span>Gaia DR3 stars</label>
-    <label class="check"><input id="ovCatwise" type="checkbox" data-cat="catwise"><span class="mark catwise"></span>CatWISE2020 infrared sources</label>
-    <p id="ovInfo" class="note">Each mark is drawn where the catalogue's proper motion puts the source on the date of the epoch shown, so a mark that follows a moving star confirms the motion. Fast movers get a trail and a label.</p>
-    <p class="note">Consecutive SPHEREx exposures of one spot are taken at different wavelengths. Each image here is the average of every exposure from one detector within one epoch, so epochs can be compared. Click the image to measure the spectrum of that spot; double-click to re-centre.</p>
-    <p class="note keys"><kbd>←</kbd><kbd>→</kbd> epoch · <kbd>Space</kbd> play · <kbd>1</kbd>–<kbd>6</kbd> band · <kbd>B</kbd> <kbd>D</kbd> <kbd>S</kbd> mode</p>
-  </aside>
+  <section class="wrap" style="padding-block: 24px 48px">
+    <div class="card facts">
+      <div><b class="t-heading">0.75–5 µm</b><span class="t-caption c-3">wavelength range</span></div>
+      <div><b class="t-heading">6</b><span class="t-caption c-3">detector bands</span></div>
+      <div><b class="t-heading" id="fVisits">4</b><span class="t-caption c-3">visits so far at Eps Indi B</span></div>
+      <div><b class="t-heading" id="fFrames">458</b><span class="t-caption c-3">exposures behind that view</span></div>
+    </div>
+  </section>
 </main>
-
-<footer class="timeline">
-  <button id="play" class="play" type="button" aria-label="Play or pause">▶</button>
-  <div id="track" class="track"></div>
-  <div id="modes" class="seg" role="group" aria-label="Mode">
-    <button data-mode="blink" type="button">Blink</button>
-    <button data-mode="diff" type="button">Difference</button>
-    <button data-mode="stack" type="button">Stack</button>
-  </div>
-  <label class="select">Speed
-    <select id="fps"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="4">4 fps</option></select>
-  </label>
-</footer>
-<script src="app.js"></script>
+<site-footer></site-footer>
+<script src="/sky.js"></script>
+<script src="/home.js"></script>
 </body>
 </html>

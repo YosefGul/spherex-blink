@@ -19,6 +19,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import json
@@ -268,4 +269,19 @@ def catalog_api(name: str = Query(pattern="^(gaia|catwise)$"),
         raise HTTPException(502, f"the {catalog.CATALOGS[name]['label']} service did not answer: {exc}") from exc
 
 
-app.mount("/", StaticFiles(directory=ROOT / "frontend", html=True), name="frontend")
+FRONTEND = ROOT / "frontend"
+PAGES = {"explore": "explore.html", "targets": "targets.html", "method": "method.html",
+         "api-docs": "api.html", "about": "about.html"}
+
+
+def _page(name: str):
+    def serve():
+        return FileResponse(FRONTEND / name)
+    return serve
+
+
+for _path, _file in PAGES.items():      # pages without the .html in their address
+    app.add_api_route(f"/{_path}", _page(_file), methods=["GET"], include_in_schema=False)
+
+# "/" is index.html (the home page); unknown addresses get 404.html.
+app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")

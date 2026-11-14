@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- AI-assisted code (Claude Code). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How it works · SPHEREx Blink</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site.css">
+<script src="/site.js"></script>
+</head>
+<body>
+<site-header active="method"></site-header>
+<div class="doc wrap">
+  <nav class="toc" aria-label="On this page">
+    <p class="t-micro c-3">On this page</p>
+    <a class="on" href="#pipeline">Pipeline</a><a href="#compare">Three ways to compare</a><a href="#spectrum">Spectrum</a><a href="#catalogues">Catalogue marks</a><a href="#limits">Known limits</a>
+  </nav>
+  <main class="doc-main">
+    <div class="page-head">
+      <p class="t-micro c-3">Method</p>
+      <h1 class="t-heading">How it works</h1>
+      <p class="t-lead c-2">Single SPHEREx exposures cannot be compared directly: consecutive exposures of one spot are taken at different wavelengths. The tool averages the exposures of each visit so that visits can be compared.</p>
+    </div>
+    <section id="pipeline">
+      <h2 class="t-title">Pipeline</h2>
+      <div class="steps">
+        <div class="card"><span class="num">1</span><h3 class="t-label">Find the exposures</h3><p class="t-body c-2">The IRSA TAP service lists every SPHEREx exposure that covers the position. For a new position this takes 20 to 30 seconds.</p></div>
+        <div class="card"><span class="num">2</span><h3 class="t-label">Read only the pixels needed</h3><p class="t-body c-2">Level 2 images sit in a public Amazon S3 bucket. Byte-range requests fetch just the rows around the target: about 0.5 MB per exposure.</p></div>
+        <div class="card"><span class="num">3</span><h3 class="t-label">Group into visits</h3><p class="t-body c-2">Exposures more than 30 days apart form separate epochs. Where coverage is continuous, it is cut into 60-day blocks.</p></div>
+        <div class="card"><span class="num">4</span><h3 class="t-label">Stack per band</h3><p class="t-body c-2">For each of the six bands and each epoch, all exposures are averaged onto one north-up grid of 3.075″ pixels.</p></div>
+      </div>
+    </section>
+    <section id="compare">
+      <h2 class="t-title">Three ways to compare</h2>
+      <div class="modes">
+        <div class="card"><h3 class="t-label">Blink</h3><p class="t-body c-2">Shows the epochs in turn. A source that moved jumps; a source that changed brightness flickers.</p></div>
+        <div class="card"><h3 class="t-label">Difference</h3><p class="t-body c-2">One epoch minus another. A moving source shows as a blue and red pair; everything that stayed the same cancels.</p></div>
+        <div class="card"><h3 class="t-label">Stack</h3><p class="t-body c-2">All epochs averaged together: the deepest image of the field, for finding faint sources.</p></div>
+      </div>
+    </section>
+    <section id="spectrum">
+      <h2 class="t-title">Spectrum</h2>
+      <p class="t-body c-2">Each exposure sees a spot through a different part of SPHEREx’s linear variable filter, so each exposure gives one point: a wavelength and a brightness. The points of all six detectors together cover 0.75 to 5 µm. They are coloured by epoch and can be downloaded as CSV.</p>
+      <p class="t-body c-2">The flux is an aperture sum minus the median of a surrounding ring. No aperture correction is applied. Exposures with saturated pixels in the aperture are skipped.</p>
+    </section>
+    <section id="catalogues">
+      <h2 class="t-title">Catalogue marks</h2>
+      <p class="t-body c-2">Gaia DR3 and CatWISE2020 sources are drawn where the catalogue’s proper motion puts each of them on the date of the epoch shown. A mark that follows a star from visit to visit confirms the motion independently. Sources with a well-measured motion above 0.15″ per year get a trail and a label.</p>
+    </section>
+    <section id="limits">
+      <h2 class="t-title">Known limits</h2>
+      <div class="card rows">
+        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The pixel-quality flags and the zodiacal-light model in the SPHEREx files are not used yet. The background is removed with a clipped median of each cutout.</p></div>
+        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">Very bright stars have empty (saturated) cores in some bands.</p></div>
+        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The field of view is at most 10 arcminutes: too small to search for a distant planet that would move by many arcminutes between visits.</p></div>
+        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The spectrum aperture is wider than the image resolution, so a neighbour within about 12″ is included in the measurement.</p></div>
+        <div><x-ico name="alert" size="16"></x-ico><p class="t-body c-2">The motion of a marked source and the list of changes are measured in the browser from the stacked images. They are aids for the eye, not calibrated astrometry or photometry.</p></div>
+      </div>
+    </section>
+  </main>
+</div>
+<site-footer></site-footer>
+</body>
+</html>
