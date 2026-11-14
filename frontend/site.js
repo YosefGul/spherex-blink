@@ -83,3 +83,6 @@ const TARGETS = [
   { name: "R Dra", short: "R Dra", long: "R Draconis", ra: 248.1675, dec: 66.7550, det: 3, kind: "varies" },
 ];
 const targetHref = t => `/explore?ra=${t.ra}&dec=${t.dec}&det=${t.det}`;
+
+// Browser-tab icon: the brand mark, drawn inline so no extra file is requested.
+document.head.insertAdjacentHTML("beforeend", `<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round">${ICONS.target}</svg>`)}">`);

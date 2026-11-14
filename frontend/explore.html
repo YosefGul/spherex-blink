@@ -3,75 +3,131 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SPHEREx Blink</title>
-<link rel="stylesheet" href="style.css">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Explore · SPHEREx Blink</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/explore.css">
+<script src="/site.js"></script>
 </head>
-<body>
-<header class="topbar">
-  <div class="logo"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true"><circle cx="8" cy="11" r="5.5" stroke="#E69F00" stroke-width="1.6"/><circle cx="14" cy="11" r="5.5" stroke="#CC79A7" stroke-width="1.6"/></svg><span>SPHEREx Blink</span></div>
-  <form id="search" class="search">
-    <input id="coord" type="text" spellcheck="false" autocomplete="off" aria-label="Right ascension and declination, or object name" placeholder="RA Dec (deg or hms dms) or object name">
-    <button type="submit">Go</button>
-  </form>
-  <nav id="targets" class="chips" aria-label="Test targets"></nav>
-  <div class="grow"></div>
-  <label class="select">FOV
-    <select id="fov">
-      <option value="120">2′</option><option value="240">4′</option><option value="360">6′</option><option value="600">10′</option>
-    </select>
-  </label>
-  <button id="copy" class="primary" type="button">Copy link</button>
+<body class="app">
+<header class="topbar" id="topbar">
+  <div class="group">
+    <site-brand></site-brand>
+    <site-nav active="explore"></site-nav>
+    <form id="search" class="search" role="search">
+      <x-ico name="search" size="14" class="only-phone"></x-ico>
+      <input id="coord" type="text" spellcheck="false" autocomplete="off" aria-label="Right ascension and declination, or an object name" placeholder="RA and Dec, or a name">
+      <button type="submit" aria-label="Go to this position"><x-ico name="arrow" size="14"></x-ico></button>
+    </form>
+    <button id="startBtn" class="select" type="button" aria-haspopup="menu" aria-expanded="false"><span id="startLabel">Test targets</span><x-ico name="chevron" size="14"></x-ico></button>
+  </div>
+  <div class="group r">
+    <span class="t-micro c-3 hide-md">Field</span>
+    <div id="fov" class="seg" role="group" aria-label="Field of view">
+      <button type="button" data-fov="120">2′</button><button type="button" data-fov="240">4′</button><button type="button" data-fov="600">10′</button>
+      <button type="button" disabled title="Wider fields need a server mode that does not exist yet">30′</button><button type="button" disabled title="Wider fields need a server mode that does not exist yet">1°</button>
+    </div>
+    <theme-toggle></theme-toggle>
+    <button id="shareBtn" class="pill" type="button" aria-haspopup="menu" aria-expanded="false"><x-ico name="link" size="14"></x-ico>Share</button>
+    <button id="helpBtn" class="round" type="button" aria-label="Help"><x-ico name="help" size="16"></x-ico></button>
+    <button id="menuBtn" class="round only-phone" type="button" aria-label="Menu"><x-ico name="menu" size="16"></x-ico></button>
+  </div>
 </header>
 
-<main class="body">
-  <aside id="rail" class="rail" aria-label="Detector band"><h2>Detector band</h2></aside>
+<main class="body" id="body">
+  <aside class="panel nav-panel" id="navigator" aria-label="Bands and visits">
+    <div class="row between"><h2 class="t-label">Bands × visits</h2><span class="t-caption c-3">exposures per stack</span></div>
+    <div id="matrix" class="matrix" role="grid" aria-label="One cell per band and visit"></div>
+    <p class="t-caption c-3">Dashed: no exposures. Click a cell to show it.</p>
+    <hr class="div">
+    <h2 class="t-label">Compare</h2>
+    <div id="modes" class="seg tabs" role="group" aria-label="Compare mode">
+      <button type="button" data-mode="blink">Blink</button><button type="button" data-mode="diff">Difference</button><button type="button" data-mode="stack">Stack</button>
+    </div>
+    <label id="refRow" class="row between t-caption c-3" hidden>Difference against <select id="ref" class="select sm"></select></label>
+    <div class="row between"><span class="t-caption c-3">Step through</span>
+      <div id="axis" class="seg tabs" role="group" aria-label="Step through"><button type="button" data-axis="epochs">Epochs</button><button type="button" data-axis="bands">Bands</button></div>
+    </div>
+    <hr class="div">
+    <h2 class="t-label">Shown now</h2>
+    <dl id="facts" class="facts-list"></dl>
+  </aside>
 
-  <section class="viewer">
-    <div id="stage" class="stage">
-      <canvas id="view" aria-label="SPHEREx image"></canvas>
-      <div class="overlay tl"><div id="epochLabel" class="epoch"></div><div id="subLabel" class="mono sub"></div></div>
-      <div id="status" class="overlay status" role="status"></div>
-      <div id="legend" class="overlay legend"></div>
+  <section class="mid" id="center">
+    <div class="stage" id="stage">
+      <div class="gut top" id="gutTop" aria-hidden="true"></div>
+      <div class="gut left" id="gutLeft" aria-hidden="true"></div>
+      <div class="image sky" id="image">
+        <canvas id="view" aria-label="SPHEREx image of the chosen patch of sky"></canvas>
+        <div class="scrim"></div>
+        <div class="lab"><div id="epochLabel" class="t-heading"></div><div id="subLabel" class="t-mono c-2"></div><div id="legend" class="t-caption c-2"></div></div>
+        <div id="cursor" class="readout t-mono" hidden></div>
+        <div id="badges"></div>
+        <div id="tour" class="tour" hidden></div>
+        <div id="state" class="state" hidden></div>
+      </div>
+    </div>
+    <div class="strip only-phone" id="timeStrip"></div>
+    <div class="strip only-phone" id="bandStrip"></div>
+    <div class="bar timeline" id="timeline">
+      <button id="play" class="playbtn" type="button" aria-label="Play or pause"></button>
+      <div id="track" class="track"></div>
+      <div id="modesPhone" class="seg tabs only-phone" role="group" aria-label="Compare mode"><button type="button" data-mode="blink">Blink</button><button type="button" data-mode="diff">Difference</button><button type="button" data-mode="stack">Stack</button></div>
+      <select id="fps" class="select" aria-label="Speed"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="4">4 fps</option></select>
+    </div>
+    <div class="bar viewrow" id="viewrow">
+      <div class="layers" id="layers" role="group" aria-label="Layers">
+        <button type="button" class="layer" data-layer="gaia"><i class="mk gaia"></i>Gaia DR3</button>
+        <button type="button" class="layer" data-layer="catwise"><i class="mk catwise"></i>CatWISE</button>
+        <button type="button" class="layer" data-layer="trail">Trail</button>
+        <button type="button" class="layer" disabled title="The pixel-quality flags are not read yet">Flags</button>
+        <button type="button" class="layer" disabled title="The zodiacal-light model is not used yet">Zodi removed</button>
+      </div>
+      <label class="cut" id="cut"><span class="t-caption c-3">Cut-off</span><input id="hi" type="range" min="0" max="100" value="14" aria-label="Brightness cut-off"><span id="hiVal" class="t-mono"></span></label>
     </div>
   </section>
 
-  <aside class="panel">
-    <h2>Current image</h2>
-    <dl id="meta" class="kv"></dl>
-    <h2>Cursor</h2>
-    <dl id="cursor" class="kv"><dt>Position</dt><dd class="mono">–</dd><dt>Value</dt><dd class="mono">–</dd><dt>Catalogue</dt><dd class="mono">–</dd></dl>
-    <h2>Spectrum at the marker</h2>
-    <canvas id="spec" class="spec" aria-label="Spectrum at the marked spot: brightness against wavelength"></canvas>
-    <p id="specHover" class="note mono">&nbsp;</p>
-    <p id="specInfo" class="note"></p>
-    <button id="specCsv" class="ghost" type="button" hidden>Download spectrum (CSV)</button>
-    <h2>Display</h2>
-    <label class="row">Upper limit <span id="hiVal" class="mono"></span>
-      <input id="hi" type="range" min="0" max="100" value="14"></label>
-    <label class="row">Difference against
-      <select id="ref"></select></label>
-    <h2>Catalogue overlays</h2>
-    <label class="check"><input id="ovGaia" type="checkbox" data-cat="gaia"><span class="mark gaia"></span>Gaia DR3 stars</label>
-    <label class="check"><input id="ovCatwise" type="checkbox" data-cat="catwise"><span class="mark catwise"></span>CatWISE2020 infrared sources</label>
-    <p id="ovInfo" class="note">Each mark is drawn where the catalogue's proper motion puts the source on the date of the epoch shown, so a mark that follows a moving star confirms the motion. Fast movers get a trail and a label.</p>
-    <p class="note">Consecutive SPHEREx exposures of one spot are taken at different wavelengths. Each image here is the average of every exposure from one detector within one epoch, so epochs can be compared. Click the image to measure the spectrum of that spot; double-click to re-centre.</p>
-    <p class="note keys"><kbd>←</kbd><kbd>→</kbd> epoch · <kbd>Space</kbd> play · <kbd>1</kbd>–<kbd>6</kbd> band · <kbd>B</kbd> <kbd>D</kbd> <kbd>S</kbd> mode</p>
+  <aside class="panel find-panel" id="findings" aria-label="Findings">
+    <div id="secMotion" class="sec-col">
+      <ol id="flow" class="flow" aria-label="Discovery steps"></ol>
+      <h2 class="t-label">Marked source</h2>
+      <div class="motion">
+        <div class="plot sky" id="plot"></div>
+        <div class="nums" id="nums"></div>
+      </div>
+      <div class="row between" id="check"></div>
+      <div class="row" id="saveRow"><button id="save" class="pill" type="button"><x-ico name="star" size="14"></x-ico><span>Save as candidate</span></button><span class="t-caption c-3">Kept in this browser only</span></div>
+    </div>
+    <hr class="div" id="divA">
+    <div id="secSpectrum" class="sec-col">
+      <div class="row between"><h2 class="t-label">Spectrum at the marker</h2><button id="specCsv" class="pill sm" type="button" hidden><x-ico name="download" size="12"></x-ico>CSV</button></div>
+      <div class="chart sky"><canvas id="spec" aria-label="Spectrum at the marked spot: brightness against wavelength"></canvas><p id="specInfo" class="t-caption c-3"></p><p id="specHover" class="t-mono c-2"></p></div>
+      <div class="row between"><span class="t-caption c-3">Aperture radius</span>
+        <div id="aper" class="seg tabs" role="group" aria-label="Aperture radius"><button type="button" data-aper="1">6″</button><button type="button" data-aper="1.5">9″</button><button type="button" data-aper="2">12″</button><button type="button" data-aper="2.5">15″</button><button type="button" data-aper="3">18″</button></div>
+      </div>
+    </div>
+    <hr class="div" id="divB">
+    <div id="secChanges" class="sec-col">
+      <h2 class="t-label">Changes in this field</h2>
+      <div id="changes" class="changes"></div>
+    </div>
   </aside>
 </main>
 
-<footer class="timeline">
-  <button id="play" class="play" type="button" aria-label="Play or pause">▶</button>
-  <div id="track" class="track"></div>
-  <div id="modes" class="seg" role="group" aria-label="Mode">
-    <button data-mode="blink" type="button">Blink</button>
-    <button data-mode="diff" type="button">Difference</button>
-    <button data-mode="stack" type="button">Stack</button>
-  </div>
-  <label class="select">Speed
-    <select id="fps"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="4">4 fps</option></select>
-  </label>
-</footer>
-<script src="app.js"></script>
+<section class="sheet only-phone" id="sheet" aria-label="Details">
+  <div class="grab" id="grab"><i></i></div>
+  <div id="sheetTabs" class="seg tabs" role="tablist"><button type="button" data-tab="find">Findings</button><button type="button" data-tab="spec">Spectrum</button><button type="button" data-tab="layers">Layers</button><button type="button" data-tab="matrix">Matrix</button></div>
+  <div id="sheetBody" class="sheet-body"></div>
+</section>
+
+<div id="pop" class="pop" hidden></div>
+<div id="modal" class="modal-wrap" hidden></div>
+<div id="toast" class="toast t-label" role="status" hidden></div>
+
+<script src="/sky.js"></script>
+<script src="/app.js"></script>
+<script src="/discover.js"></script>
 </body>
 </html>
