@@ -63,6 +63,11 @@ h2 { margin: 0; font-size: 10px; font-weight: 500; letter-spacing: .06em; text-t
 .spec { width: 100%; height: 190px; flex: none; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-canvas); cursor: crosshair; }
 .ghost { align-self: flex-start; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: none; color: var(--text-2); font-size: 12px; }
 .ghost[hidden] { display: none; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); cursor: pointer; }
+.check input { accent-color: var(--accent); margin: 0; }
+.mark { width: 10px; height: 10px; flex: none; border: 1.5px solid; }
+.mark.gaia { border-radius: 50%; border-color: #7FDBFF; }
+.mark.catwise { border-color: #FFB347; transform: rotate(45deg) scale(.85); }
 .note { margin: 0; font-size: 11px; line-height: 16px; color: var(--text-3); }
 kbd { font-family: var(--mono); font-size: 10px; padding: 1px 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); margin-right: 2px; }
 

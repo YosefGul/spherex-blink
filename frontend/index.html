@@ -40,7 +40,7 @@
     <h2>Current image</h2>
     <dl id="meta" class="kv"></dl>
     <h2>Cursor</h2>
-    <dl id="cursor" class="kv"><dt>Position</dt><dd class="mono">–</dd><dt>Value</dt><dd class="mono">–</dd></dl>
+    <dl id="cursor" class="kv"><dt>Position</dt><dd class="mono">–</dd><dt>Value</dt><dd class="mono">–</dd><dt>Catalogue</dt><dd class="mono">–</dd></dl>
     <h2>Spectrum at the marker</h2>
     <canvas id="spec" class="spec" aria-label="Spectrum at the marked spot: brightness against wavelength"></canvas>
     <p id="specHover" class="note mono">&nbsp;</p>
@@ -48,9 +48,13 @@
     <button id="specCsv" class="ghost" type="button" hidden>Download spectrum (CSV)</button>
     <h2>Display</h2>
     <label class="row">Upper limit <span id="hiVal" class="mono"></span>
-      <input id="hi" type="range" min="4" max="80" value="12"></label>
+      <input id="hi" type="range" min="0" max="100" value="14"></label>
     <label class="row">Difference against
       <select id="ref"></select></label>
+    <h2>Catalogue overlays</h2>
+    <label class="check"><input id="ovGaia" type="checkbox" data-cat="gaia"><span class="mark gaia"></span>Gaia DR3 stars</label>
+    <label class="check"><input id="ovCatwise" type="checkbox" data-cat="catwise"><span class="mark catwise"></span>CatWISE2020 infrared sources</label>
+    <p id="ovInfo" class="note">Each mark is drawn where the catalogue's proper motion puts the source on the date of the epoch shown, so a mark that follows a moving star confirms the motion. Fast movers get a trail and a label.</p>
     <p class="note">Consecutive SPHEREx exposures of one spot are taken at different wavelengths. Each image here is the average of every exposure from one detector within one epoch, so epochs can be compared. Click the image to measure the spectrum of that spot; double-click to re-centre.</p>
     <p class="note keys"><kbd>←</kbd><kbd>→</kbd> epoch · <kbd>Space</kbd> play · <kbd>1</kbd>–<kbd>6</kbd> band · <kbd>B</kbd> <kbd>D</kbd> <kbd>S</kbd> mode</p>
   </aside>

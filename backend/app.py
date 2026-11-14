@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 import json
 
+from spx import catalog
 from spx.index import query_frames
 from spx.spectrum import spectrum as measure_spectrum
 from spx.stack import NATIVE_PIX, Epoch, build, split_epochs
@@ -171,6 +172,26 @@ def get_spectrum(ra: float, dec: float, fov: float, pra: float, pdec: float,
     return out
 
 
+def get_catalog(name: str, ra: float, dec: float, fov: float, save_to: Path | None = None) -> dict:
+    """Catalogue sources for a view: cached, shipped, or asked from the catalogue service."""
+    key = f"v2_{name}_{ra:.4f}_{dec:+.4f}_{fov:g}.json"
+    if save_to is None:
+        for base in (CACHE, SEED):
+            path = base / "catalog" / key
+            if path.exists():
+                try:
+                    return json.loads(path.read_text())
+                except Exception as exc:
+                    print(f"ignoring {path}: {exc}")
+    out = catalog.query(name, ra, dec, fov)
+    path = (save_to or CACHE) / "catalog" / key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.stem}.{threading.get_ident()}.tmp")
+    tmp.write_text(json.dumps(out, separators=(",", ":")))
+    os.replace(tmp, path)
+    return out
+
+
 def _epoch_meta(ep: Epoch) -> dict:
     mjds = [f.mjd for f in ep.frames]
     counts = {d: sum(f.detector == d for f in ep.frames) for d in BANDS}
@@ -230,6 +251,18 @@ def spectrum(ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
     except Exception as exc:
         raise HTTPException(502, f"could not measure the spectrum: {exc}") from exc
     return out or {"ra": pra, "dec": pdec, "points": None}
+
+
+@app.get("/api/catalog")
+def catalog_api(name: str = Query(pattern="^(gaia|catwise)$"),
+                ra: float = Query(ge=0, lt=360), dec: float = Query(ge=-90, le=90),
+                fov: float = Query(240, ge=30, le=600)):
+    """Gaia DR3 or CatWISE2020 sources in the view, each with position at the catalogue's
+    reference epoch (decimal year) and proper motion in mas/yr."""
+    try:
+        return get_catalog(name, ra, dec, fov)
+    except Exception as exc:
+        raise HTTPException(502, f"the {catalog.CATALOGS[name]['label']} service did not answer: {exc}") from exc
 
 
 app.mount("/", StaticFiles(directory=ROOT / "frontend", html=True), name="frontend")

@@ -22,7 +22,11 @@ Built for the NASA Space Apps Challenge 2026, challenge "Planet X and SPHEREx".
   different part of SPHEREx's linear variable filter, so each exposure gives one point
   (wavelength, brightness). The points of all six detectors together cover 0.75 to 5
   micrometres, coloured by epoch, and can be downloaded as CSV.
-- Keeps the position, field of view, band and mode in the page address, so a view can be
+- Overlays **Gaia DR3** and **CatWISE2020** sources. Each mark is drawn where the
+  catalogue's proper motion puts the source on the date of the epoch shown, so a mark that
+  follows a star from epoch to epoch confirms the motion independently. Sources with a
+  well-measured motion above 0.15 arcseconds per year get a trail and a label.
+- Keeps the position, field of view, band, mode and overlays in the page address, so a view can be
   shared as a link. `&embed=1` hides the side panels.
 
 The five test targets named in the challenge are one click away: Barnard's Star,
@@ -56,6 +60,7 @@ The container listens on `$PORT` if the host sets it, otherwise on 7860.
 | Which exposures cover a position | IRSA TAP service, tables `spherex.plane` and `spherex.artifact` |
 | Pixels | Level 2 spectral images in the public `nasa-irsa-spherex` bucket on Amazon S3, read as byte ranges so that only the rows around the target are downloaded |
 | Object names (optional) | CDS Sesame name resolver |
+| Catalogue overlays (optional) | Gaia DR3 from the ESA Gaia archive TAP service; CatWISE2020 from IRSA TAP |
 
 The first request for a new position is slow: the IRSA query takes 20 to 30 seconds and
 each exposure costs about 0.5 MB of download. Answers are cached on disk. Results for the
@@ -76,6 +81,9 @@ python backend/make_seed.py --refresh
   (`pra`, `pdec`) inside that view: wavelength and bandwidth in micrometres, flux and noise
   in mJy, date, detector and epoch. The flux is an aperture sum (radius 12.3 arcseconds)
   minus the median of a surrounding ring; no aperture correction is applied.
+- `GET /api/catalog?name=gaia|catwise&ra=&dec=&fov=` returns the catalogue sources in the
+  view: position at the catalogue's reference epoch, proper motion in mas/yr and its
+  significance, and a magnitude (G for Gaia, W2 for CatWISE).
 - `GET /api/health`
 
 ## Known limits
@@ -102,6 +110,9 @@ python backend/make_seed.py --refresh
 ## Data and software credits
 
 - SPHEREx data: NASA/JPL-Caltech, served by the NASA/IPAC Infrared Science Archive (IRSA).
+- Gaia DR3: European Space Agency (ESA) mission Gaia, processed by the Gaia Data Processing
+  and Analysis Consortium (DPAC).
+- CatWISE2020: based on data from NASA's WISE and NEOWISE missions, served by IRSA.
 - NumPy, SciPy, Astropy, Requests, FastAPI, Uvicorn.
 - The idea of blinking epochs of an infrared survey follows WiseView.
 

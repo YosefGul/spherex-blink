@@ -17,14 +17,27 @@ const BANDS = {
 const D2R = Math.PI / 180;
 const $ = id => document.getElementById(id);
 
-const S = { ra: 133.7598, dec: -7.2422, fov: 240, det: 5, mode: "blink", ep: 0, ref: 0, hi: 12,
+const S = { ra: 133.7598, dec: -7.2422, fov: 240, det: 5, mode: "blink", ep: 0, ref: 0, hi: 12, hiAuto: true,
   fps: 2, timer: null, meta: null, stacks: {}, pending: {}, token: 0,
-  pick: null, spec: null, specState: "", specDrawn: [] };
+  pick: null, spec: null, specState: "", specDrawn: [],
+  ov: { gaia: false, catwise: false }, cats: {}, ovDrawn: [] };
 const BAND_UM = { 1: [0.75, 1.09], 2: [1.10, 1.62], 3: [1.63, 2.41], 4: [2.42, 3.82], 5: [3.83, 4.41], 6: [4.42, 5.00] };
 const PREFETCH_MAX_FRAMES = 600;
 const SESAME_MIRRORS = ["https://vizier.cfa.harvard.edu/viz-bin/nph-sesame", "https://cds.unistra.fr/cgi-bin/nph-sesame"];
 
 // ---------- helpers ----------
+// The contrast slider is logarithmic: 0..100 maps to an upper limit of 4σ..10000σ.
+const sliderToHi = v => Math.round(4 * 10 ** (v / 100 * 3.4));
+const hiToSlider = h => Math.round(100 * Math.log10(h / 4) / 3.4);
+function autoStretch(det) {          // bright target: open the stretch so its core is not burnt out
+  const st = S.stacks[det];
+  if (!S.hiAuto || !st?.mean) return;
+  const n = st.n, c = (n - 1) >> 1;
+  let pk = 0;
+  for (let j = c - 4; j <= c + 4; j++) for (let i = c - 4; i <= c + 4; i++) pk = Math.max(pk, st.mean[j * n + i] || 0);
+  S.hi = pk > 100 * st.sigma ? Math.min(10000, Math.round(0.6 * pk / st.sigma)) : 12;
+  $("hi").value = hiToSlider(S.hi);
+}
 const epColor = i => EPOCH_COLORS[i % EPOCH_COLORS.length];
 const mjdDate = mjd => new Date((mjd - 40587) * 86400000);
 const isoDay = mjd => mjdDate(mjd).toISOString().slice(0, 10);
@@ -117,7 +130,8 @@ async function load() {
   const token = ++S.token;
   stop();
   S.meta = null; S.stacks = {}; S.pending = {};
-  S.pick = { ra: S.ra, dec: S.dec }; S.spec = null; S.specState = "";
+  S.pick = { ra: S.ra, dec: S.dec }; S.spec = null; S.specState = ""; S.cats = {};
+  S.hiAuto = true; S.hi = 12;
   writeUrl(); syncControls(); buildRail(); $("track").innerHTML = ""; render();
   setStatus("Looking up SPHEREx exposures… A new position takes about 30 s the first time.");
   try {
@@ -128,6 +142,7 @@ async function load() {
     S.ep = meta.epochs.length - 1; S.ref = 0;
     buildTrack(); buildRef();
     loadSpectrum(true);
+    for (const name of Object.keys(S.ov)) if (S.ov[name]) loadCat(name);
     await ensureDet(S.det, token);
     // Each exposure costs ~0.5 MB of archive reads. Prefetch the other bands for their
     // thumbnails only where that is cheap; elsewhere a band loads when it is selected.
@@ -152,6 +167,7 @@ async function loadDet(det, token) {
   const mean = meanImage(epochs.map(e => e.img));
   S.stacks[det] = { n: r.n, pixscale: r.pixscale, epochs, mean, sigma: mean ? robustSigma(mean) : 1 };
   if (det === S.det) {
+    autoStretch(det);
     setStatus("");
     if (!epochs[S.ep]?.img) S.ep = Math.max(0, epochs.findLastIndex(e => e.img));
     if (!epochs[S.ref]?.img) S.ref = Math.max(0, epochs.findIndex(e => e.img));
@@ -185,7 +201,9 @@ function paint(cur, st) {
   const n = st.n, sig = st.sigma;
   off.width = off.height = n;
   const ctx = off.getContext("2d"), id = ctx.createImageData(n, n), px = id.data;
-  const lo = -2 * sig, hi = S.hi * sig, k = Math.asinh(8), dmax = S.hi * (cur.sigma || sig) / 2;
+  // asinh stretch; the wider the range, the more logarithmic, so faint stars stay visible next to a bright one
+  const soft = Math.max(8, S.hi / 3), k = Math.asinh(soft);
+  const lo = -2 * sig, hi = S.hi * sig, dmax = Math.min(S.hi, 40) * (cur.sigma || sig) / 2;
   for (let j = 0; j < n; j++) {
     for (let i = 0; i < n; i++) {
       const v = cur.img[j * n + i], o = ((n - 1 - j) * n + i) * 4;   // row 0 is south: flip
@@ -197,7 +215,7 @@ function paint(cur, st) {
           r = 16 + (c[0] - 16) * t; g = 18 + (c[1] - 18) * t; b = 24 + (c[2] - 24) * t;
         } else {
           const u = Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
-          r = g = b = 255 * Math.asinh(8 * u) / k;
+          r = g = b = 255 * Math.asinh(soft * u) / k;
         }
       }
       px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = 255;
@@ -245,6 +263,7 @@ function drawOverlay(ctx, x0, y0, side, dpr) {
     ctx.save(); ctx.strokeStyle = "#DDE6FF"; ctx.lineWidth = 1.5 * dpr; ctx.setLineDash([4 * dpr, 3 * dpr]);
     ctx.beginPath(); ctx.arc(mx, my, rad, 0, 2 * Math.PI); ctx.stroke(); ctx.restore();
   }
+  drawCatalogs(ctx, x0, y0, side, dpr);
   const arc = S.fov <= 150 ? 15 : S.fov <= 400 ? 30 : 60, len = side / S.fov * arc;
   const bx = x0 + side - 84 * dpr, by = y0 + side - 34 * dpr;
   ctx.fillStyle = "#E8ECF2"; ctx.fillRect(bx - len, by, len, 2 * dpr);
@@ -256,6 +275,78 @@ function drawOverlay(ctx, x0, y0, side, dpr) {
   ctx.font = `${10 * dpr}px Inter, system-ui, sans-serif`;
   ctx.fillText("N", ox, oy - a - 4 * dpr); ctx.fillText("E", ox - a - 8 * dpr, oy + 3 * dpr);
 }
+// ---------- catalogue overlays ----------
+const CATS = { gaia: { color: "#7FDBFF", unit: "G" }, catwise: { color: "#FFB347", unit: "W2" } };
+const FAST_MAS = 150, MAX_MARKS = 80;      // label sources faster than this; draw at most this many others
+const mjdYear = mjd => 2000 + (mjd - 51544.5) / 365.25;
+// A motion counts only if the catalogue measured it well: faint CatWISE sources have large, noisy values.
+const pmTotal = s => (s.pm_snr != null && s.pm_snr >= 3 ? Math.hypot(s.pmra, s.pmdec) : 0);
+const isFast = s => s.pm_snr != null && s.pm_snr >= 5 && Math.hypot(s.pmra, s.pmdec) >= FAST_MAS;
+
+async function loadCat(name) {
+  const token = S.token;
+  $("ovInfo").textContent = `Asking the ${name === "gaia" ? "Gaia" : "CatWISE"} catalogue… (CatWISE can take a minute.)`;
+  try {
+    const r = await api(`/api/catalog?name=${name}&ra=${S.ra}&dec=${S.dec}&fov=${S.fov}`);
+    if (token !== S.token) return;
+    const fast = r.sources.filter(isFast);
+    const rest = r.sources.filter(s => !isFast(s)).slice(0, MAX_MARKS);   // brightest first
+    S.cats[name] = { ...r, shown: [...fast, ...rest] };
+    $("ovInfo").textContent = !r.sources.length ? `${r.label} lists no sources in this view.` : `${r.label}: ${fast.length + rest.length} of ${r.sources.length}${r.truncated ? "+" : ""} sources shown (the brightest, and every fast mover).`;
+  } catch (e) {
+    if (token !== S.token) return;
+    S.ov[name] = false; document.querySelector(`[data-cat="${name}"]`).checked = false;
+    $("ovInfo").textContent = e.message;
+  }
+  writeUrl(); render();
+}
+function sourceAt(s, year) {             // catalogue position moved to the given date
+  const dt = pmTotal(s) ? year - s.epoch : 0;
+  return { ra: s.ra + s.pmra * dt / 3.6e6 / Math.cos(s.dec * D2R), dec: s.dec + s.pmdec * dt / 3.6e6 };
+}
+function drawCatalogs(ctx, x0, y0, side, dpr) {
+  const st = S.stacks[S.det], eps = S.meta?.epochs;
+  S.ovDrawn = [];
+  if (!st || !eps?.length) return;
+  const years = eps.map(e => mjdYear(e.mjd));
+  const now = S.mode === "stack" ? years.reduce((a, b) => a + b, 0) / years.length : years[S.ep];
+  const toScreen = c => {
+    const p = skyToPix(c.ra, c.dec, st.n, st.pixscale);
+    return [x0 + (p.ix + 0.5) / st.n * side, y0 + (1 - (p.iy + 0.5) / st.n) * side];
+  };
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, y0, side, side); ctx.clip();
+  ctx.font = `${10 * dpr}px ui-monospace, Consolas, monospace`; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  for (const name of Object.keys(CATS)) {
+    const cat = S.cats[name];
+    if (!S.ov[name] || !cat) continue;
+    ctx.strokeStyle = ctx.fillStyle = CATS[name].color; ctx.lineWidth = 1.3 * dpr;
+    for (const s of cat.shown) {
+      const [mx, my] = toScreen(sourceAt(s, now)), pm = Math.hypot(s.pmra, s.pmdec), r = 5 * dpr;
+      if (isFast(s)) {              // trail from the first to the last SPHEREx epoch
+        const [ax, ay] = toScreen(sourceAt(s, years[0])), [bx, by] = toScreen(sourceAt(s, years[years.length - 1]));
+        ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.fillText(`${(pm / 1000).toFixed(2)}″/yr`, mx + r + 4 * dpr, my - r - 2 * dpr);
+      }
+      ctx.beginPath();
+      if (name === "gaia") ctx.arc(mx, my, r, 0, 2 * Math.PI);
+      else { ctx.moveTo(mx, my - r * 1.2); ctx.lineTo(mx + r * 1.2, my); ctx.lineTo(mx, my + r * 1.2); ctx.lineTo(mx - r * 1.2, my); ctx.closePath(); }
+      ctx.stroke();
+      S.ovDrawn.push({ x: mx / dpr, y: my / dpr, s, label: cat.label, unit: CATS[name].unit });
+    }
+  }
+  ctx.restore();
+}
+function nearestSource(ev) {
+  const r = $("view").getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  let best = null, bd = 100;
+  for (const d of S.ovDrawn) { const k = (d.x - mx) ** 2 + (d.y - my) ** 2; if (k < bd) { bd = k; best = d; } }
+  if (!best) return "–";
+  const s = best.s, pm = Math.hypot(s.pmra, s.pmdec);
+  const motion = s.pm_snr == null ? "no motion given" : `${pm.toFixed(0)} mas/yr (${s.pm_snr.toFixed(0)}σ)`;
+  return `${best.label} ${s.id}  ${best.unit}=${s.mag == null ? "?" : s.mag.toFixed(1)}  ${motion}`;
+}
+
 // ---------- spectrum ----------
 async function loadSpectrum(cachedOnly) {
   const token = S.token, pick = S.pick;
@@ -476,6 +567,7 @@ function setDet(d) {
   if (S.meta?.epochs.length) {
     buildTrack();
     setStatus(S.stacks[d] ? "" : `Reading D${d} exposures from the SPHEREx archive…`);
+    autoStretch(d);
     ensureDet(d);
   }
   render();
@@ -494,6 +586,8 @@ function goTo(ra, dec, det) {
 function writeUrl() {
   const p = new URLSearchParams(location.search);
   p.set("ra", S.ra); p.set("dec", S.dec); p.set("fov", S.fov); p.set("det", S.det); p.set("mode", S.mode);
+  const on = Object.keys(S.ov).filter(k => S.ov[k]);
+  if (on.length) p.set("ov", on.join(",")); else p.delete("ov");
   history.replaceState(null, "", "?" + p);
 }
 function readUrl() {
@@ -502,11 +596,12 @@ function readUrl() {
   if ([120, 240, 360, 600].includes(num("fov"))) S.fov = num("fov");
   if (num("det") >= 1 && num("det") <= 6) S.det = Math.round(num("det"));
   if (["blink", "diff", "stack"].includes(p.get("mode"))) S.mode = p.get("mode");
+  for (const k of (p.get("ov") || "").split(",")) if (k in S.ov) S.ov[k] = true;
   document.body.classList.toggle("embed", p.get("embed") === "1");
 }
 function syncControls() {
   $("coord").value = `${S.ra.toFixed(5)} ${S.dec >= 0 ? "+" : ""}${S.dec.toFixed(5)}`;
-  $("fov").value = S.fov; $("fps").value = S.fps; $("hi").value = S.hi;
+  $("fov").value = S.fov; $("fps").value = S.fps; $("hi").value = hiToSlider(S.hi);
   document.querySelectorAll(".chip").forEach((c, i) => {
     const t = TARGETS[i];
     c.setAttribute("aria-pressed", String(Math.abs(t.ra - S.ra) < 1e-4 && Math.abs(t.dec - S.dec) < 1e-4));
@@ -531,7 +626,7 @@ function init() {
   };
   $("fov").onchange = e => { S.fov = Number(e.target.value); load(); };
   $("fps").onchange = e => { S.fps = Number(e.target.value); if (S.timer) { stop(); play(); } };
-  $("hi").oninput = e => { S.hi = Number(e.target.value); render(); };
+  $("hi").oninput = e => { S.hi = sliderToHi(Number(e.target.value)); S.hiAuto = false; render(); };
   $("ref").onchange = e => { S.ref = Number(e.target.value); if (S.mode === "diff" && S.ep === S.ref) step(1); else render(); };
   $("play").onclick = () => { if (S.timer) { stop(); render(); } else play(); };
   document.querySelectorAll("#modes button").forEach(b => (b.onclick = () => setMode(b.dataset.mode)));
@@ -556,6 +651,7 @@ function init() {
     const p = pointer(ev), dd = $("cursor").querySelectorAll("dd");
     dd[0].textContent = p ? `${p.ra.toFixed(5)}  ${p.dec >= 0 ? "+" : "−"}${Math.abs(p.dec).toFixed(5)}` : "–";
     dd[1].textContent = p && Number.isFinite(p.val) ? `${p.val.toExponential(2)} MJy/sr (${(p.val / p.sigma).toFixed(1)}σ)` : "–";
+    dd[2].textContent = nearestSource(ev);
   };
   let clickTimer = null;   // wait briefly so that a double-click does not also measure a spectrum
   view.onclick = ev => {
@@ -568,6 +664,13 @@ function init() {
   $("spec").onmousemove = specHover;
   $("spec").onmouseleave = () => ($("specHover").textContent = "\u00a0");
   $("specCsv").onclick = specCsv;
+  document.querySelectorAll("[data-cat]").forEach(box => {
+    box.checked = S.ov[box.dataset.cat];
+    box.onchange = () => {
+      S.ov[box.dataset.cat] = box.checked;
+      if (box.checked && !S.cats[box.dataset.cat] && S.meta) loadCat(box.dataset.cat); else { writeUrl(); render(); }
+    };
+  });
 
   window.addEventListener("keydown", ev => {
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(ev.target.tagName) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
@@ -582,6 +685,7 @@ function init() {
   new ResizeObserver(() => render()).observe($("stage"));
 
   readUrl();
+  document.querySelectorAll("[data-cat]").forEach(box => (box.checked = S.ov[box.dataset.cat]));
   load();
 }
 init();

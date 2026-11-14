@@ -13,7 +13,7 @@ import argparse
 import shutil
 import time
 
-from app import CACHE, SEED, get_spectrum, get_stack
+from app import CACHE, SEED, get_catalog, get_spectrum, get_stack
 from spx.index import _cache_file, query_frames
 
 TARGETS = {
@@ -51,6 +51,12 @@ def main() -> None:
             print(f"{name:15s} spectrum: {len(sp['points'])} points")
         except Exception as exc:
             print(f"{name:15s} spectrum: FAILED, {exc}")
+        for cat in ("gaia", "catwise"):
+            try:
+                c = get_catalog(cat, ra, dec, FOV, save_to=SEED)
+                print(f"{name:15s} {cat}: {len(c['sources'])} sources")
+            except Exception as exc:
+                print(f"{name:15s} {cat}: FAILED, {exc}")
         print(f"{name}: {len(frames)} exposures, {time.time() - t0:.0f} s")
 
 
