@@ -489,7 +489,7 @@ function buildMatrix() {
   const eps = S.meta?.epochs || [], m = $("matrix"), n = eps.length;
   m.style.setProperty("--n", Math.max(n, 1));
   m.classList.toggle("wide", n > 4);        // more visits than fit: the table scrolls sideways, band names stay in place
-  const months = eps.map(e => e.label.split(" ")[0]), head = (e, i) => (months.indexOf(months[i]) === months.lastIndexOf(months[i]) ? months[i] : shortLabel(e));
+  const months = eps.map(e => e.label.split(" ")[0]), head = (e, i) => (months.indexOf(months[i]) === months.lastIndexOf(months[i]) ? months[i] : shortLabel(e).replace("’", ""));
   let html = `<div class="mrow head"><span class="t-mono c-3">µm</span>${eps.map((e, i) => `<span class="t-caption c-3" data-ep="${i}">${esc(head(e, i))}</span>`).join("")}</div>`;
   for (const d of DETS) {
     html += `<div class="mrow" data-det="${d}" role="row"><button type="button" class="band" data-det="${d}" title="${BANDS[d]}"><b>D${d}</b><span class="t-mono c-3">${BAND_UM[d][0].toFixed(1)}–${BAND_UM[d][1].toFixed(1)}</span></button>`;

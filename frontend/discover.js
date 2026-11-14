@@ -207,7 +207,7 @@ function renderCheck() {
   if (!c) { el.innerHTML = ""; return; }
   if (c.best) {
     const s = c.best.s;
-    el.innerHTML = `<span class="res t-body c-2" title="${esc(String(s.id))}"><span class="ok">${ico("check", 16)}</span>${CATS[c.best.name].label} source, ${CATS[c.best.name].unit} ${s.mag == null ? "?" : s.mag.toFixed(1)}, ${c.best.d.toFixed(1)}″ away</span><span class="tag">Known object</span>`;
+    el.innerHTML = `<span class="res t-body c-2" title="${esc(String(s.id))}"><span class="ok">${ico("check", 16)}</span>${CATS[c.best.name].label} · ${CATS[c.best.name].unit} ${s.mag == null ? "?" : s.mag.toFixed(1)} · ${c.best.d.toFixed(1)}″ away</span><span class="tag">Known object</span>`;
   } else if (c.loading) {
     el.innerHTML = `<span class="res t-body c-3">${ico("database", 16)}Asking Gaia DR3 and CatWISE2020…</span>`;
   } else {
@@ -223,7 +223,7 @@ function saveCandidate() {
   if (!S.pick || !eps.length) return;
   const item = { id: Date.now().toString(36), saved: new Date().toISOString(), ra: Number(S.pick.ra.toFixed(5)), dec: Number(S.pick.dec.toFixed(5)),
     det: S.det, visits: `${eps[0].label} – ${eps[eps.length - 1].label}`, shift: m?.moved ? Number(m.shift.toFixed(2)) : null, shift_err: m?.pts ? Number(m.err.toFixed(2)) : null,
-    rate: m?.moved && m.rate ? Number(m.rate.toFixed(3)) : null, catalogue: checkText(c) || "not checked", note: "", url: App.pageUrl() };
+    rate: m?.moved && m.rate ? Number(m.rate.toFixed(2)) : null, catalogue: checkText(c) || "not checked", note: "", url: App.pageUrl() };
   list.unshift(item);
   if (!store.set("spx.candidates", list)) { toast("This browser does not allow saving here."); return; }
   F.savedKey = pickKey();
