@@ -10,6 +10,8 @@ ENV HOME=/home/user \
     PYTHONUNBUFFERED=1 \
     SPX_CACHE_DIR=/tmp/spx-cache
 WORKDIR /home/user/app
+# Created here so that a volume mounted on it (to keep the cache across restarts) is writable.
+RUN mkdir -p /tmp/spx-cache
 
 COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
